@@ -30,7 +30,9 @@ jobs:
             source_parts/part-gap2.b64 \
             source_parts/part03.b64 \
             | base64 --decode > /tmp/blofy-ios-source.zip
-          echo "SHA256=$(shasum -a 256 /tmp/blofy-ios-source.zip | awk '{print $1}')"
+          ACTUAL_SHA="$(shasum -a 256 /tmp/blofy-ios-source.zip | awk '{print $1}')"
+          echo "SHA256=$ACTUAL_SHA"
+          test "$ACTUAL_SHA" = "16518f2f1f2e502775fb42a9b1b348d1d3b1a7e5bd383217626265f38130f3c7"
           unzip -t /tmp/blofy-ios-source.zip
           rm -rf /tmp/blofy-ios-src
           mkdir -p /tmp/blofy-ios-src
