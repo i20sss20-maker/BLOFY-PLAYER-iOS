@@ -19,7 +19,7 @@ struct SimpleRootView: View {
                         .tabItem { Label("الرئيسية", systemImage: "house.fill") }
                         .tag(0)
 
-                    CatalogView(kind: .live)
+                    LiveExperienceView()
                         .tabItem { Label("مباشر", systemImage: "tv.fill") }
                         .tag(1)
 
@@ -201,6 +201,7 @@ private struct SimpleHeroCard: View {
                 HStack(spacing: 9) {
                     if let featured {
                         Button {
+                            RecentLiveStore.record(featured)
                             if let session = try? model.makePlaybackSession(for: featured) { play = session }
                         } label: {
                             Label("شاهد الآن", systemImage: "play.fill")
