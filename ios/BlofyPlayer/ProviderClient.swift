@@ -8,14 +8,15 @@ actor ProviderClient {
         config.timeoutIntervalForRequest = 35
         config.timeoutIntervalForResource = 180
         config.requestCachePolicy = .reloadIgnoringLocalCacheData
-        config.httpMaximumConnectionsPerHost = 5
+        config.httpMaximumConnectionsPerHost = 6
         return URLSession(configuration: config)
     }()
 
     private func requestData(_ url: URL) async throws -> Data {
         var request = URLRequest(url: url)
-        request.setValue("BLOFY-PLAYER-iOS/1.0", forHTTPHeaderField: "User-Agent")
+        request.setValue("BLOFY-PLAYER-iOS/1.1", forHTTPHeaderField: "User-Agent")
         request.setValue("application/json,text/plain,*/*", forHTTPHeaderField: "Accept")
+        request.setValue("gzip, deflate", forHTTPHeaderField: "Accept-Encoding")
         let (data, response) = try await session.data(for: request)
         guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) else {
             throw AppError.message("السيرفر رفض الطلب")
@@ -37,6 +38,65 @@ actor ProviderClient {
         components.queryItems = query
         guard let url = components.url else { throw AppError.message("تعذر تكوين طلب السيرفر") }
         return url
+    }
+
+    private struct KindBatch: Sendable {
+        let kind: ContentKind
+        let categories: [MediaCategory]
+        let items: [MediaItem]
+    }
+
+    private func loadKind(_ provider: Playlist, kind: ContentKind, categoryAction: String, itemAction: String) async throws -> KindBatch {
+        let categoryURL = try apiURL(provider, action: categoryAction)
+        let itemURL = try apiURL(provider, action: itemAction)
+
+        async let categoryDataTask = requestData(categoryURL)
+        async let itemDataTask = requestData(itemURL)
+        let (categoryData, itemData) = try await (categoryDataTask, itemDataTask)
+
+        var parsedCategories: [MediaCategory] = []
+        var parsedItems: [MediaItem] = []
+
+        if let rows = try JSONSerialization.jsonObject(with: categoryData) as? [[String: Any]] {
+            parsedCategories.reserveCapacity(rows.count)
+            for row in rows {
+                let key = string(row["category_id"])
+                guard !key.isEmpty else { continue }
+                parsedCategories.append(MediaCategory(key: key, name: first(string(row["category_name"]), key), kind: kind))
+            }
+        }
+
+        guard let rows = try JSONSerialization.jsonObject(with: itemData) as? [[String: Any]] else {
+            throw AppError.message("تعذر قراءة \(kind.title)")
+        }
+        parsedItems.reserveCapacity(rows.count)
+        for row in rows {
+            let remote = string(row[kind == .series ? "series_id" : "stream_id"])
+            guard !remote.isEmpty else { continue }
+            let category = first(string(row["category_id"]), "uncategorized")
+            parsedItems.append(MediaItem(
+                id: "\(kind.rawValue):\(remote)",
+                remoteID: remote,
+                kind: kind,
+                name: first(string(row["name"]), remote),
+                categoryID: category,
+                poster: first(string(row["stream_icon"]), string(row["cover"])),
+                container: first(string(row["container_extension"]), "mp4"),
+                directURL: string(row["direct_source"]),
+                plot: string(row["plot"]),
+                rating: first(string(row["rating"]), string(row["rating_5based"]))
+            ))
+        }
+
+        let known = Set(parsedCategories.map { $0.key })
+        var missing = Set<String>()
+        for item in parsedItems where !known.contains(item.categoryID) {
+            missing.insert(item.categoryID)
+        }
+        for key in missing {
+            parsedCategories.append(MediaCategory(key: key, name: "بدون تصنيف", kind: kind))
+        }
+        return KindBatch(kind: kind, categories: parsedCategories, items: parsedItems)
     }
 
     func loadCatalog(
@@ -67,62 +127,49 @@ actor ProviderClient {
         var categories = cachedCategories
         var items = cachedItems
         var completed = completedStages
-        let jobs: [(ContentKind, String, String, Double, Double)] = [
-            (.live, "get_live_categories", "get_live_streams", 0.08, 0.35),
-            (.movie, "get_vod_categories", "get_vod_streams", 0.36, 0.68),
-            (.series, "get_series_categories", "get_series", 0.69, 0.94)
-        ]
 
-        for job in jobs {
-            let (kind, categoryAction, itemAction, startProgress, endProgress) = job
-            if completed.contains(kind.rawValue) { continue }
+        func apply(_ batch: KindBatch, value: Double, message: String) async {
+            categories.removeAll { $0.kind == batch.kind }
+            items.removeAll { $0.kind == batch.kind }
+            categories.append(contentsOf: batch.categories)
+            items.append(contentsOf: batch.items)
+            completed.insert(batch.kind.rawValue)
+            await progress(value, message)
+            await checkpoint(categories, items, completed, value, message)
+        }
 
-            await progress(startProgress, "تحميل \(kind.title)")
-            let categoryData = try await requestData(apiURL(provider, action: categoryAction))
-            await progress(startProgress + (endProgress - startProgress) * 0.25, "قراءة تصنيفات \(kind.title)")
-            let itemData = try await requestData(apiURL(provider, action: itemAction))
-            await progress(startProgress + (endProgress - startProgress) * 0.68, "تجهيز \(kind.title)")
+        if !completed.contains(ContentKind.live.rawValue) {
+            await progress(0.08, "تحميل البث المباشر")
+            let live = try await loadKind(provider, kind: .live, categoryAction: "get_live_categories", itemAction: "get_live_streams")
+            await apply(live, value: 0.34, message: "اكتمل البث المباشر")
+        }
 
-            categories.removeAll { $0.kind == kind }
-            items.removeAll { $0.kind == kind }
+        let needMovie = !completed.contains(ContentKind.movie.rawValue)
+        let needSeries = !completed.contains(ContentKind.series.rawValue)
 
-            if let rows = try JSONSerialization.jsonObject(with: categoryData) as? [[String: Any]] {
-                for row in rows {
-                    let key = string(row["category_id"])
-                    guard !key.isEmpty else { continue }
-                    categories.append(MediaCategory(key: key, name: first(string(row["category_name"]), key), kind: kind))
+        if needMovie || needSeries {
+            await progress(0.36, needMovie && needSeries ? "تحميل الأفلام والمسلسلات معًا" : (needMovie ? "تحميل الأفلام" : "تحميل المسلسلات"))
+
+            try await withThrowingTaskGroup(of: KindBatch.self) { group in
+                if needMovie {
+                    group.addTask { [self] in
+                        try await self.loadKind(provider, kind: .movie, categoryAction: "get_vod_categories", itemAction: "get_vod_streams")
+                    }
+                }
+                if needSeries {
+                    group.addTask { [self] in
+                        try await self.loadKind(provider, kind: .series, categoryAction: "get_series_categories", itemAction: "get_series")
+                    }
+                }
+
+                for try await batch in group {
+                    if batch.kind == .movie {
+                        await apply(batch, value: needSeries ? 0.66 : 0.90, message: "اكتملت الأفلام")
+                    } else if batch.kind == .series {
+                        await apply(batch, value: needMovie ? 0.90 : 0.90, message: "اكتملت المسلسلات")
+                    }
                 }
             }
-
-            guard let rows = try JSONSerialization.jsonObject(with: itemData) as? [[String: Any]] else {
-                throw AppError.message("تعذر قراءة \(kind.title)")
-            }
-            for row in rows {
-                let remote = string(row[kind == .series ? "series_id" : "stream_id"])
-                guard !remote.isEmpty else { continue }
-                let category = first(string(row["category_id"]), "uncategorized")
-                items.append(MediaItem(
-                    id: "\(kind.rawValue):\(remote)",
-                    remoteID: remote,
-                    kind: kind,
-                    name: first(string(row["name"]), remote),
-                    categoryID: category,
-                    poster: first(string(row["stream_icon"]), string(row["cover"])),
-                    container: first(string(row["container_extension"]), "mp4"),
-                    directURL: string(row["direct_source"]),
-                    plot: string(row["plot"]),
-                    rating: first(string(row["rating"]), string(row["rating_5based"]))
-                ))
-            }
-
-            for item in items where item.kind == kind && !categories.contains(where: { $0.kind == kind && $0.key == item.categoryID }) {
-                categories.append(MediaCategory(key: item.categoryID, name: "بدون تصنيف", kind: kind))
-            }
-
-            completed.insert(kind.rawValue)
-            let message = "اكتمل \(kind.title)"
-            await progress(endProgress, message)
-            await checkpoint(categories, items, completed, endProgress, message)
         }
 
         guard !items.isEmpty else { throw AppError.message("السيرفر أعاد قوائم فارغة") }
