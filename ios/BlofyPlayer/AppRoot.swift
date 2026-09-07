@@ -9,11 +9,13 @@ struct AppRoot: View {
                 RootView()
             } else {
                 ZStack {
-                    LinearGradient(colors: [Color(red: 0.035, green: 0.025, blue: 0.06), Color(red: 0.08, green: 0.045, blue: 0.12)], startPoint: .topLeading, endPoint: .bottomTrailing).ignoresSafeArea()
+                    BlofyTheme.backgroundGradient.ignoresSafeArea()
                     ActivationView()
                 }
             }
         }
+        .tint(BlofyTheme.purpleBright)
+        .preferredColorScheme(.dark)
         .task {
             await model.refreshActivation()
             if model.activationAllowsUse {
