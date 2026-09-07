@@ -43,6 +43,23 @@ jobs:
           test -f /tmp/blofy-ios-src/BLOFY-iOS-preview-source/ios/build_unsigned.sh
           echo "Source bundle reconstructed successfully"
 
+      - name: Patch Xcode 16.4 acknowledgements compatibility
+        shell: bash
+        run: |
+          set -euo pipefail
+          SCRIPT=/tmp/blofy-ios-src/BLOFY-iOS-preview-source/ios/build_unsigned.sh
+          python3 - "$SCRIPT" <<'PY'
+          from pathlib import Path
+          import sys
+          p = Path(sys.argv[1])
+          s = p.read_text()
+          start = s.index("# Include the actual pinned pod's full acknowledgements in the application resources.")
+          end = s.index("xcrun swiftc -swift-version 5", start)
+          replacement = '''# Include CocoaPods acknowledgements as text; avoids Python 3.14 plist parsing incompatibility on Xcode 16.4 runners.\nACK='Pods/Target Support Files/Pods-BlofyPlayer/Pods-BlofyPlayer-acknowledgements.plist'\n[[ -f "$ACK" ]] || { echo 'Missing CocoaPods license acknowledgements; refusing to package.' >&2; exit 1; }\n{ cat THIRD_PARTY_HEADER.txt; printf '\\n\\n--- CocoaPods acknowledgements ---\\n'; cat "$ACK"; } > BlofyPlayer/Resources/THIRD_PARTY_NOTICES.txt\n'''
+          p.write_text(s[:start] + replacement + s[end:])
+          PY
+          bash -n "$SCRIPT"
+
       - name: Xcode environment
         shell: bash
         run: |
