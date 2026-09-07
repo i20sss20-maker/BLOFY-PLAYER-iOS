@@ -382,11 +382,11 @@ final class PlayerBox: ObservableObject {
 
     func refreshTracks() {
         if engine == .vlc {
-            let rawAudio: [VLCMediaPlayerTrack] = vlcPlayer.audioTracks
+            let rawAudio: [VLCMediaPlayer.Track] = vlcPlayer.audioTracks
             audioTracks = rawAudio.enumerated().map { PlayerTrack(id: $0.offset, name: cleanTrackName($0.element.trackName, fallback: "صوت \($0.offset + 1)")) }
             selectedAudioTrack = rawAudio.firstIndex(where: { $0.isSelectedExclusively }) ?? -1
 
-            let rawText: [VLCMediaPlayerTrack] = vlcPlayer.textTracks
+            let rawText: [VLCMediaPlayer.Track] = vlcPlayer.textTracks
             subtitleTracks = rawText.enumerated().filter { !isDisabledTrack($0.element.trackName) }.map { PlayerTrack(id: $0.offset, name: cleanTrackName($0.element.trackName, fallback: "ترجمة \($0.offset + 1)")) }
             if let selected = rawText.firstIndex(where: { $0.isSelectedExclusively && !isDisabledTrack($0.trackName) }) { selectedSubtitleTrack = selected } else { selectedSubtitleTrack = -1 }
         } else if let item = player.currentItem {
@@ -403,7 +403,7 @@ final class PlayerBox: ObservableObject {
 
     func selectAudio(_ id: Int) {
         if engine == .vlc {
-            let tracks: [VLCMediaPlayerTrack] = vlcPlayer.audioTracks
+            let tracks: [VLCMediaPlayer.Track] = vlcPlayer.audioTracks
             if tracks.indices.contains(id) { tracks[id].isSelectedExclusively = true }
         } else if let item = player.currentItem, let group = item.asset.mediaSelectionGroup(forMediaCharacteristic: .audible), group.options.indices.contains(id) { item.select(group.options[id], in: group) }
         selectedAudioTrack = id
@@ -412,7 +412,7 @@ final class PlayerBox: ObservableObject {
 
     func selectSubtitle(_ id: Int) {
         if engine == .vlc {
-            let tracks: [VLCMediaPlayerTrack] = vlcPlayer.textTracks
+            let tracks: [VLCMediaPlayer.Track] = vlcPlayer.textTracks
             if id < 0 {
                 if let disabled = tracks.first(where: { isDisabledTrack($0.trackName) }) { disabled.isSelectedExclusively = true }
                 else { tracks.forEach { $0.isSelectedExclusively = false } }
