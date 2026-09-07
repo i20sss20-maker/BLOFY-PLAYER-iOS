@@ -22,7 +22,11 @@ final class PiPManager: NSObject, ObservableObject, AVPictureInPictureController
         if attachedLayer === layer, controller != nil { refresh(); return }
         controller?.delegate = nil
         attachedLayer = layer
-        let next = AVPictureInPictureController(playerLayer: layer)
+        guard let next = AVPictureInPictureController(playerLayer: layer) else {
+            controller = nil
+            isPossible = false
+            return
+        }
         next.delegate = self
         next.canStartPictureInPictureAutomaticallyFromInline = true
         controller = next
