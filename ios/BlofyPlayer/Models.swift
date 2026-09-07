@@ -64,7 +64,7 @@ struct ResumeEntry: Codable {
 struct PlaybackSession: Identifiable {
     let id = UUID()
     let item: MediaItem
-    let url: URL
+    let candidates: [URL]
     let start: Double
 }
 
