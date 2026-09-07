@@ -1,0 +1,7 @@
+platform :ios, '16.0'
+use_frameworks!
+install! 'cocoapods', :deterministic_uuids => false
+
+target 'BlofyPlayer' do
+  pod 'MobileVLCKit', '4.0.0a2'
+end
