@@ -135,19 +135,21 @@ final class PlayerBox: ObservableObject {
 
     private func installTimeObserver() {
         token = player.addPeriodicTimeObserver(forInterval: CMTime(seconds: 1, preferredTimescale: 600), queue: .main) { [weak self] time in
-            guard let self, self.engine == .apple else { return }
-            let now = time.seconds
-            if now.isFinite {
-                self.current = now
-                if self.lastPosition < 0 || now - self.lastPosition >= 0.75 {
-                    self.lastPosition = now
-                    self.lastAdvanceAt = Date()
-                    self.statusText = ""
-                    self.retriesOnCurrent = 0
+            Task { @MainActor in
+                guard let self, self.engine == .apple else { return }
+                let now = time.seconds
+                if now.isFinite {
+                    self.current = now
+                    if self.lastPosition < 0 || now - self.lastPosition >= 0.75 {
+                        self.lastPosition = now
+                        self.lastAdvanceAt = Date()
+                        self.statusText = ""
+                        self.retriesOnCurrent = 0
+                    }
                 }
+                let total = self.player.currentItem?.duration.seconds ?? 0
+                if total.isFinite && total > 0 { self.duration = total }
             }
-            let total = self.player.currentItem?.duration.seconds ?? 0
-            if total.isFinite && total > 0 { self.duration = total }
         }
     }
 
@@ -227,7 +229,11 @@ final class PlayerBox: ObservableObject {
         openedAt = Date(); lastAdvanceAt = Date(); lastPosition = -1
         statusText = "تشغيل بمحرك VLC…"
 
-        let media = VLCMedia(url: url)
+        guard let media = VLCMedia(url: url) else {
+            switching = false
+            tryVLCFallback()
+            return
+        }
         media.addOptions(["network-caching": isLive ? 1200 : 2500, "http-user-agent": "BLOFY PLAYER/2.0"])
         vlcPlayer.media = media
         vlcPlayer.play()
