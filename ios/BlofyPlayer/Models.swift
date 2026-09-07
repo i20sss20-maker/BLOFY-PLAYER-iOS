@@ -66,6 +66,8 @@ struct PlaybackSession: Identifiable {
     let item: MediaItem
     let candidates: [URL]
     let start: Double
+    let preferredEngine: String
+    let bufferProfile: String
 }
 
 enum AppError: LocalizedError {
