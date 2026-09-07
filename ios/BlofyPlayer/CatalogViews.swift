@@ -18,28 +18,48 @@ struct CatalogView: View {
     var body: some View {
         NavigationStack {
             VStack(spacing: 0) {
+                HStack {
+                    BlofyBrandMark(compact: true)
+                    Spacer()
+                    Text(kind.title).font(.title2.bold()).foregroundStyle(BlofyTheme.textPrimary)
+                }.padding(.horizontal, 16).padding(.top, 10)
+
                 ScrollView(.horizontal, showsIndicators: false) {
-                    HStack {
-                        Button("الكل") { selectedCategory = "all" }.buttonStyle(.borderedProminent).tint(selectedCategory == "all" ? .purple : .gray)
+                    HStack(spacing: 9) {
+                        CategoryPill(title: "الكل", selected: selectedCategory == "all") { selectedCategory = "all" }
                         ForEach(categories) { category in
-                            Button(category.name) { selectedCategory = category.key }
-                                .buttonStyle(.bordered)
-                                .tint(selectedCategory == category.key ? .purple : .secondary)
+                            CategoryPill(title: category.name, selected: selectedCategory == category.key) { selectedCategory = category.key }
                         }
-                    }.padding()
+                    }.padding(.horizontal, 16).padding(.vertical, 12)
                 }
-                if model.loading { ProgressView(value: model.progress).tint(.purple).padding() }
-                if !model.error.isEmpty { Text(model.error).foregroundStyle(.red).padding() }
+
+                if !model.error.isEmpty { Text(model.error).font(.caption).foregroundStyle(BlofyTheme.error).padding(.horizontal) }
+
                 ScrollView {
-                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 150), spacing: 14)], spacing: 18) {
+                    LazyVGrid(columns: [GridItem(.adaptive(minimum: kind == .live ? 165 : 145), spacing: 13)], spacing: 18) {
                         ForEach(shown) { MediaCard(item: $0) }
-                    }.padding()
+                    }.padding(.horizontal, 16).padding(.bottom, 30)
                 }
             }
-            .navigationTitle(kind.title)
+            .background(BlofyTheme.backgroundGradient.ignoresSafeArea())
+            .toolbar(.hidden, for: .navigationBar)
             .searchable(text: $query, prompt: "بحث في \(kind.title)")
             .refreshable { await model.loadCatalog(force: true) }
         }
+    }
+}
+
+private struct CategoryPill: View {
+    let title: String
+    let selected: Bool
+    let action: () -> Void
+    var body: some View {
+        Button(action: action) {
+            Text(title).font(.caption.weight(.bold)).lineLimit(1)
+                .padding(.horizontal, 14).padding(.vertical, 9)
+                .background(selected ? AnyShapeStyle(BlofyTheme.primaryGradient) : AnyShapeStyle(BlofyTheme.surfaceRaised), in: Capsule())
+                .overlay(Capsule().stroke(selected ? BlofyTheme.purpleSoft.opacity(0.55) : BlofyTheme.divider, lineWidth: 1))
+        }.buttonStyle(.plain).foregroundStyle(selected ? .white : BlofyTheme.textSecondary)
     }
 }
 
@@ -51,22 +71,37 @@ struct DetailsView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
-                Poster(url: item.poster).frame(maxWidth: .infinity).frame(height: item.kind == .live ? 260 : 420).clipShape(RoundedRectangle(cornerRadius: 22))
-                Text(item.name).font(.largeTitle.bold())
-                if !item.rating.isEmpty { Label(item.rating, systemImage: "star.fill").foregroundStyle(.yellow) }
-                if !item.plot.isEmpty { Text(item.plot).foregroundStyle(.secondary) }
-                HStack {
+                ZStack(alignment: .bottomLeading) {
+                    Poster(url: item.poster)
+                        .frame(maxWidth: .infinity).frame(height: item.kind == .live ? 240 : 390)
+                        .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
+                    LinearGradient(colors: [.clear, BlofyTheme.background.opacity(0.95)], startPoint: .center, endPoint: .bottom)
+                        .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
+                    VStack(alignment: .leading, spacing: 5) {
+                        Text(item.kind.title.uppercased()).font(.caption2.bold()).tracking(1.8).foregroundStyle(BlofyTheme.purpleBright)
+                        Text(item.name).font(.system(size: 30, weight: .black)).foregroundStyle(BlofyTheme.textPrimary).lineLimit(3)
+                    }.padding(18)
+                }
+                if !item.rating.isEmpty {
+                    Label(item.rating, systemImage: "star.fill").font(.subheadline.bold()).foregroundStyle(BlofyTheme.purpleSoft)
+                }
+                if !item.plot.isEmpty { Text(item.plot).font(.body).foregroundStyle(BlofyTheme.textSecondary).lineSpacing(4) }
+                HStack(spacing: 11) {
                     Button { start() } label: {
                         Label(model.resume[item.id] == nil ? "تشغيل" : "استئناف", systemImage: "play.fill")
-                    }.buttonStyle(.borderedProminent).tint(.purple)
+                            .font(.headline).frame(maxWidth: .infinity).padding(.vertical, 13)
+                            .background(BlofyTheme.primaryGradient, in: RoundedRectangle(cornerRadius: 17, style: .continuous))
+                    }.buttonStyle(.plain).foregroundStyle(.white)
                     Button { model.toggleFavorite(item) } label: {
-                        Label(model.favorites.contains(item.id) ? "إزالة من المفضلة" : "المفضلة", systemImage: model.favorites.contains(item.id) ? "heart.fill" : "heart")
-                    }.buttonStyle(.bordered)
+                        Image(systemName: model.favorites.contains(item.id) ? "heart.fill" : "heart")
+                            .font(.headline).frame(width: 50, height: 50)
+                            .background(BlofyTheme.surfaceRaised, in: RoundedRectangle(cornerRadius: 17, style: .continuous))
+                    }.buttonStyle(.plain).foregroundStyle(BlofyTheme.purpleSoft)
                 }
-            }.padding()
+            }.padding(16)
         }
-        .navigationTitle(item.name)
-        .navigationBarTitleDisplayMode(.inline)
+        .background(BlofyTheme.backgroundGradient.ignoresSafeArea())
+        .navigationTitle(item.name).navigationBarTitleDisplayMode(.inline)
         .task { if item.kind == .movie { item = await model.detailedMovie(item) } }
         .fullScreenCover(item: $play) { PlayerScreen(session: $0) }
     }
@@ -83,38 +118,38 @@ struct SeriesDetailsView: View {
     @State private var episodes: [MediaItem] = []
     @State private var loading = true
     @State private var error = ""
-
     private var seasons: [Int] { Array(Set(episodes.map { $0.season })).sorted() }
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
-                Poster(url: series.poster).frame(maxWidth: .infinity).frame(height: 360).clipShape(RoundedRectangle(cornerRadius: 22))
-                Text(series.name).font(.largeTitle.bold())
+                Poster(url: series.poster).frame(maxWidth: .infinity).frame(height: 350).clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
+                Text(series.name).font(.system(size: 30, weight: .black)).foregroundStyle(BlofyTheme.textPrimary)
                 Button { model.toggleFavorite(series) } label: {
-                    Label(model.favorites.contains(series.id) ? "إزالة من المفضلة" : "المفضلة", systemImage: model.favorites.contains(series.id) ? "heart.fill" : "heart")
-                }.buttonStyle(.bordered)
-                if loading { ProgressView("تحميل الحلقات…") }
-                if !error.isEmpty { Text(error).foregroundStyle(.red) }
+                    Label(model.favorites.contains(series.id) ? "إزالة من المفضلة" : "إضافة للمفضلة", systemImage: model.favorites.contains(series.id) ? "heart.fill" : "heart")
+                }.buttonStyle(.bordered).tint(BlofyTheme.purpleBright)
+                if loading { ProgressView("تحميل الحلقات…").tint(BlofyTheme.purpleBright) }
+                if !error.isEmpty { Text(error).foregroundStyle(BlofyTheme.error) }
                 ForEach(seasons, id: \.self) { season in
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("الموسم \(season)").font(.title2.bold())
+                    VStack(alignment: .leading, spacing: 10) {
+                        Text("الموسم \(season)").font(.title3.bold()).foregroundStyle(BlofyTheme.textPrimary)
                         ForEach(episodes.filter { $0.season == season }) { episode in
                             NavigationLink { DetailsView(item: episode) } label: {
-                                HStack {
-                                    Poster(url: episode.poster).frame(width: 120, height: 72).clipShape(RoundedRectangle(cornerRadius: 9))
-                                    VStack(alignment: .leading) {
-                                        Text("الحلقة \(episode.episode)").font(.headline)
-                                        Text(episode.name).font(.caption).foregroundStyle(.secondary).lineLimit(2)
+                                HStack(spacing: 12) {
+                                    Poster(url: episode.poster).frame(width: 118, height: 70).clipShape(RoundedRectangle(cornerRadius: 12))
+                                    VStack(alignment: .leading, spacing: 4) {
+                                        Text("الحلقة \(episode.episode)").font(.headline).foregroundStyle(BlofyTheme.textPrimary)
+                                        Text(episode.name).font(.caption).foregroundStyle(BlofyTheme.textMuted).lineLimit(2)
                                     }
                                     Spacer()
-                                }.padding(.vertical, 5)
+                                }.padding(10).blofyPanel(radius: 16)
                             }.buttonStyle(.plain)
                         }
                     }
                 }
-            }.padding()
+            }.padding(16)
         }
+        .background(BlofyTheme.backgroundGradient.ignoresSafeArea())
         .navigationTitle(series.name)
         .task {
             do { episodes = try await model.episodes(for: series) }
@@ -131,19 +166,23 @@ struct SearchView: View {
         let needle = normalizedSearch(query)
         return needle.isEmpty ? [] : Array(model.items.filter { normalizedSearch($0.name).contains(needle) }.prefix(200))
     }
-
     var body: some View {
         NavigationStack {
             List(results) { item in
                 NavigationLink {
                     if item.kind == .series { SeriesDetailsView(series: item) } else { DetailsView(item: item) }
                 } label: {
-                    HStack {
-                        Poster(url: item.poster).frame(width: 64, height: 82).clipShape(RoundedRectangle(cornerRadius: 8))
-                        VStack(alignment: .leading) { Text(item.name); Text(item.kind.title).font(.caption).foregroundStyle(.secondary) }
+                    HStack(spacing: 12) {
+                        Poster(url: item.poster).frame(width: 62, height: 82).clipShape(RoundedRectangle(cornerRadius: 10))
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(item.name).foregroundStyle(BlofyTheme.textPrimary)
+                            Text(item.kind.title).font(.caption).foregroundStyle(BlofyTheme.purpleSoft)
+                        }
                     }
-                }
+                }.listRowBackground(BlofyTheme.surface.opacity(0.82))
             }
+            .scrollContentBackground(.hidden)
+            .background(BlofyTheme.backgroundGradient)
             .navigationTitle("البحث")
             .searchable(text: $query, prompt: "اكتب من أول حرف")
         }
