@@ -1,0 +1,81 @@
+name: Build unsigned BLOFY iOS IPA
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/build-unsigned-ipa.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: macos-15
+    timeout-minutes: 45
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Reconstruct source bundle
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat source_parts/part00.b64 source_parts/part01.b64 source_parts/part02.b64 source_parts/part03.b64 | base64 --decode > /tmp/blofy-ios-source.zip
+          rm -rf /tmp/blofy-ios-src
+          mkdir -p /tmp/blofy-ios-src
+          unzip -q /tmp/blofy-ios-source.zip -d /tmp/blofy-ios-src
+          test -f /tmp/blofy-ios-src/BLOFY-iOS-preview-source/ios/build_unsigned.sh
+          echo "Source bundle reconstructed successfully"
+
+      - name: Xcode environment
+        shell: bash
+        run: |
+          set -euo pipefail
+          xcodebuild -version
+          swift --version
+          ruby --version
+
+      - name: Ensure CocoaPods
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! command -v pod >/dev/null 2>&1; then
+            sudo gem install cocoapods -v 1.16.2 --no-document
+          fi
+          pod --version
+
+      - name: Build unsigned IPA
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT=/tmp/blofy-ios-src/BLOFY-iOS-preview-source
+          cd "$ROOT"
+          chmod +x ios/build_unsigned.sh
+          bash ios/build_unsigned.sh
+          test -s ios/dist/BLOFY-PLAYER-iOS-0.1.0-unsigned.ipa
+          unzip -t ios/dist/BLOFY-PLAYER-iOS-0.1.0-unsigned.ipa
+          shasum -a 256 ios/dist/BLOFY-PLAYER-iOS-0.1.0-unsigned.ipa
+
+      - name: Upload unsigned IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: BLOFY-PLAYER-iOS-unsigned-${{ github.run_number }}
+          path: |
+            /tmp/blofy-ios-src/BLOFY-iOS-preview-source/ios/dist/BLOFY-PLAYER-iOS-0.1.0-unsigned.ipa
+            /tmp/blofy-ios-src/BLOFY-iOS-preview-source/ios/dist/BUILD_MANIFEST.json
+            /tmp/blofy-ios-src/BLOFY-iOS-preview-source/ios/dist/SHA256SUMS.txt
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload build diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: BLOFY-iOS-build-diagnostics-${{ github.run_number }}
+          path: |
+            /tmp/blofy-ios-src/BLOFY-iOS-preview-source/ios/build/*.log
+            /tmp/blofy-ios-src/BLOFY-iOS-preview-source/ios/Podfile.lock
+          if-no-files-found: ignore
+          retention-days: 7
