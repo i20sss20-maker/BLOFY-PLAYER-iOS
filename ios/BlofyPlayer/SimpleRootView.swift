@@ -1,4 +1,5 @@
 import SwiftUI
+import VLCKit
 
 struct SimpleRootView: View {
     @EnvironmentObject var model: AppModel
@@ -60,6 +61,11 @@ private struct SimpleHomeView: View {
     private var continueItems: [MediaItem] {
         Array(model.resume.values.sorted { $0.updatedAt > $1.updatedAt }.map(\.item).prefix(12))
     }
+    private var movies: [MediaItem] { Array(model.items.filter { $0.kind == .movie }.prefix(18)) }
+    private var series: [MediaItem] { Array(model.items.filter { $0.kind == .series }.prefix(18)) }
+    private var liveCount: Int { model.items.reduce(0) { $1.kind == .live ? $0 + 1 : $0 } }
+    private var movieCount: Int { model.items.reduce(0) { $1.kind == .movie ? $0 + 1 : $0 } }
+    private var seriesCount: Int { model.items.reduce(0) { $1.kind == .series ? $0 + 1 : $0 } }
 
     var body: some View {
         NavigationStack {
@@ -81,6 +87,13 @@ private struct SimpleHomeView: View {
                     .padding(.top, 8)
 
                     SimpleHeroCard(tab: $tab)
+
+                    HStack(spacing: 8) {
+                        SimpleStat(value: liveCount, title: "قناة")
+                        SimpleStat(value: movieCount, title: "فيلم")
+                        SimpleStat(value: seriesCount, title: "مسلسل")
+                    }
+                    .padding(.horizontal, 16)
 
                     VStack(alignment: .leading, spacing: 12) {
                         Text("وش تبي تشاهد؟")
@@ -113,6 +126,12 @@ private struct SimpleHomeView: View {
                     if !continueItems.isEmpty {
                         SectionRow(title: "متابعة المشاهدة", subtitle: "كمل من حيث وقفت", items: continueItems)
                     }
+                    if !movies.isEmpty {
+                        SectionRow(title: "أفلام", subtitle: "وصول سريع لمكتبتك", items: movies)
+                    }
+                    if !series.isEmpty {
+                        SectionRow(title: "مسلسلات", subtitle: "مواسم وحلقات", items: series)
+                    }
 
                     if !model.error.isEmpty {
                         HStack(spacing: 10) {
@@ -139,6 +158,8 @@ private struct SimpleHomeView: View {
 private struct SimpleHeroCard: View {
     @EnvironmentObject var model: AppModel
     @Binding var tab: Int
+    @StateObject private var preview = SimpleHomePreviewBox()
+    @State private var play: PlaybackSession?
 
     private var featured: MediaItem? {
         model.items.first(where: { $0.kind == .live && !$0.poster.isEmpty }) ?? model.items.first(where: { $0.kind == .live })
@@ -148,21 +169,27 @@ private struct SimpleHeroCard: View {
         ZStack(alignment: .bottomLeading) {
             Group {
                 if let item = featured {
-                    Poster(url: item.poster)
+                    ZStack {
+                        SimpleVLCPreviewSurface(player: preview.player)
+                        if !preview.ready { Poster(url: item.poster).opacity(0.88) }
+                    }
                 } else {
                     BlofyTheme.heroGradient
                 }
             }
             .frame(maxWidth: .infinity)
-            .frame(height: 220)
+            .frame(height: 232)
             .clipped()
 
-            LinearGradient(colors: [.clear, .black.opacity(0.86)], startPoint: .top, endPoint: .bottom)
+            LinearGradient(colors: [.clear, .black.opacity(0.28), .black.opacity(0.9)], startPoint: .top, endPoint: .bottom)
 
             VStack(alignment: .leading, spacing: 8) {
-                Text("BLOFY PLAYER")
-                    .font(.caption.bold())
-                    .foregroundStyle(BlofyTheme.purpleSoft)
+                HStack(spacing: 7) {
+                    Circle().fill(BlofyTheme.mint).frame(width: 7, height: 7)
+                    Text(preview.ready ? "معاينة مباشرة" : "BLOFY PLAYER")
+                        .font(.caption.bold())
+                        .foregroundStyle(preview.ready ? BlofyTheme.mint : BlofyTheme.purpleSoft)
+                }
                 Text(featured?.name ?? "جاهز للمشاهدة")
                     .font(.system(size: 25, weight: .black))
                     .foregroundStyle(.white)
@@ -171,22 +198,103 @@ private struct SimpleHeroCard: View {
                     .font(.caption)
                     .foregroundStyle(.white.opacity(0.72))
                     .lineLimit(1)
-                Button { tab = 1 } label: {
-                    Label("فتح البث", systemImage: "play.fill")
-                        .font(.subheadline.bold())
-                        .padding(.horizontal, 15)
-                        .padding(.vertical, 10)
-                        .background(.white, in: Capsule())
-                        .foregroundStyle(.black)
+                HStack(spacing: 9) {
+                    if let featured {
+                        Button {
+                            if let session = try? model.makePlaybackSession(for: featured) { play = session }
+                        } label: {
+                            Label("شاهد الآن", systemImage: "play.fill")
+                                .font(.subheadline.bold())
+                                .padding(.horizontal, 15)
+                                .padding(.vertical, 10)
+                                .background(.white, in: Capsule())
+                                .foregroundStyle(.black)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                    Button { tab = 1 } label: {
+                        Label("كل القنوات", systemImage: "tv")
+                            .font(.subheadline.bold())
+                            .padding(.horizontal, 13)
+                            .padding(.vertical, 10)
+                            .background(.black.opacity(0.45), in: Capsule())
+                            .foregroundStyle(.white)
+                    }
+                    .buttonStyle(.plain)
                 }
-                .buttonStyle(.plain)
             }
             .padding(18)
         }
-        .frame(height: 220)
-        .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 24).stroke(BlofyTheme.divider))
+        .frame(height: 232)
+        .clipShape(RoundedRectangle(cornerRadius: 26, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 26).stroke(BlofyTheme.purpleSoft.opacity(0.22)))
+        .shadow(color: BlofyTheme.purple.opacity(0.15), radius: 18, y: 8)
         .padding(.horizontal, 16)
+        .task(id: featured?.id) {
+            preview.stop()
+            guard let featured,
+                  let session = try? model.makePlaybackSession(for: featured),
+                  let url = session.candidates.first else { return }
+            preview.start(url: url)
+        }
+        .onDisappear { preview.stop() }
+        .fullScreenCover(item: $play) { PlayerScreen(session: $0) }
+    }
+}
+
+private struct SimpleVLCPreviewSurface: UIViewRepresentable {
+    let player: VLCMediaPlayer
+    func makeUIView(context: Context) -> UIView {
+        let view = UIView()
+        view.backgroundColor = .black
+        player.drawable = view
+        return view
+    }
+    func updateUIView(_ uiView: UIView, context: Context) {
+        if (player.drawable as AnyObject?) !== uiView { player.drawable = uiView }
+    }
+}
+
+@MainActor
+private final class SimpleHomePreviewBox: ObservableObject {
+    let player = VLCMediaPlayer()
+    @Published var ready = false
+    private var timer: Timer?
+
+    func start(url: URL) {
+        stop()
+        guard let media = VLCMedia(url: url) else { return }
+        media.addOptions(["network-caching": 650, "no-audio": 1, "http-user-agent": "BLOFY PLAYER/2.0"])
+        player.media = media
+        player.play()
+        timer = Timer.scheduledTimer(withTimeInterval: 0.65, repeats: true) { [weak self] _ in
+            Task { @MainActor in
+                guard let self else { return }
+                if self.player.isPlaying { self.ready = true }
+            }
+        }
+    }
+
+    func stop() {
+        timer?.invalidate()
+        timer = nil
+        player.stop()
+        ready = false
+    }
+}
+
+private struct SimpleStat: View {
+    let value: Int
+    let title: String
+    var body: some View {
+        VStack(spacing: 2) {
+            Text("\(value)").font(.headline.bold()).foregroundStyle(BlofyTheme.textPrimary).monospacedDigit()
+            Text(title).font(.caption2).foregroundStyle(BlofyTheme.textMuted)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 10)
+        .background(BlofyTheme.surfaceRaised.opacity(0.9), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 14).stroke(BlofyTheme.divider))
     }
 }
 
