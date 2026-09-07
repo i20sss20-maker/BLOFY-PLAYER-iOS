@@ -54,7 +54,7 @@ actor LiveEPGClient {
         ]
         guard let url = parts.url else { return [] }
         var request = URLRequest(url: url)
-        request.timeoutInterval = 10
+        request.timeoutInterval = 8
         request.setValue("BLOFY PLAYER/2.0", forHTTPHeaderField: "User-Agent")
         do {
             let (data, response) = try await URLSession.shared.data(for: request)
@@ -69,16 +69,12 @@ actor LiveEPGClient {
                     description: decodeEPGText(row["description"]) ?? ""
                 )
             }
-        } catch {
-            return []
-        }
+        } catch { return [] }
     }
 
     private func decodeEPGText(_ value: Any?) -> String? {
         guard let raw = value as? String, !raw.isEmpty else { return nil }
-        if let data = Data(base64Encoded: raw), let decoded = String(data: data, encoding: .utf8), !decoded.isEmpty {
-            return decoded
-        }
+        if let data = Data(base64Encoded: raw), let decoded = String(data: data, encoding: .utf8), !decoded.isEmpty { return decoded }
         return raw
     }
 
@@ -102,6 +98,7 @@ struct LiveExperienceView: View {
     @State private var recentIDs: [String] = RecentLiveStore.ids()
     @State private var programs: [LiveProgram] = []
     @State private var play: PlaybackSession?
+    @State private var favoritesOnly = false
     @StateObject private var preview = LivePreviewController()
 
     private var categories: [MediaCategory] { model.categories.filter { $0.kind == .live } }
@@ -109,89 +106,44 @@ struct LiveExperienceView: View {
     private var shown: [MediaItem] {
         allChannels.filter {
             (selectedCategory == "all" || $0.categoryID == selectedCategory) &&
+            (!favoritesOnly || model.favorites.contains($0.id)) &&
             (query.isEmpty || normalizedSearch($0.name).contains(normalizedSearch(query)))
         }
     }
-    private var selected: MediaItem? {
-        allChannels.first { $0.id == selectedID } ?? shown.first
-    }
-    private var recentChannels: [MediaItem] {
-        recentIDs.compactMap { id in allChannels.first { $0.id == id } }
-    }
+    private var selected: MediaItem? { allChannels.first { $0.id == selectedID } ?? shown.first }
+    private var recentChannels: [MediaItem] { recentIDs.compactMap { id in allChannels.first { $0.id == id } } }
 
     var body: some View {
         NavigationStack {
             ScrollView {
-                LazyVStack(alignment: .leading, spacing: 16, pinnedViews: []) {
-                    HStack {
-                        BlofyBrandMark(compact: true)
-                        Spacer()
-                        VStack(alignment: .trailing, spacing: 2) {
-                            Text("البث المباشر").font(.title2.bold())
-                            Text("\(shown.count) قناة").font(.caption2).foregroundStyle(BlofyTheme.textMuted)
-                        }
-                    }
-                    .padding(.horizontal, 16)
-                    .padding(.top, 8)
+                LazyVStack(alignment: .leading, spacing: 16) {
+                    header
 
                     if let selected {
-                        LivePreviewHero(item: selected, programs: programs, preview: preview) {
-                            watch(selected)
-                        }
+                        LivePreviewHero(
+                            item: selected,
+                            programs: programs,
+                            preview: preview,
+                            isFavorite: model.favorites.contains(selected.id),
+                            previous: { step(-1) },
+                            next: { step(1) },
+                            favorite: { model.toggleFavorite(selected) },
+                            watch: { watch(selected) }
+                        )
                         .padding(.horizontal, 16)
                         .task(id: selected.id) { await select(selected, autoplay: true) }
+                        .gesture(
+                            DragGesture(minimumDistance: 30)
+                                .onEnded { value in
+                                    if value.translation.width < -50 { step(1) }
+                                    else if value.translation.width > 50 { step(-1) }
+                                }
+                        )
                     }
 
-                    if !recentChannels.isEmpty {
-                        VStack(alignment: .leading, spacing: 9) {
-                            Text("آخر القنوات").font(.headline.bold()).padding(.horizontal, 16)
-                            ScrollView(.horizontal, showsIndicators: false) {
-                                HStack(spacing: 10) {
-                                    ForEach(recentChannels.prefix(10)) { item in
-                                        Button { selectedID = item.id } label: {
-                                            HStack(spacing: 8) {
-                                                Poster(url: item.poster).frame(width: 40, height: 32).clipShape(RoundedRectangle(cornerRadius: 8))
-                                                Text(item.name).font(.caption.bold()).lineLimit(1).frame(maxWidth: 130)
-                                            }
-                                            .padding(.horizontal, 10).padding(.vertical, 8)
-                                            .background(BlofyTheme.surfaceRaised, in: Capsule())
-                                            .overlay(Capsule().stroke(BlofyTheme.divider))
-                                        }
-                                        .buttonStyle(.plain)
-                                        .foregroundStyle(BlofyTheme.textPrimary)
-                                    }
-                                }.padding(.horizontal, 16)
-                            }
-                        }
-                    }
-
-                    HStack(spacing: 9) {
-                        Menu {
-                            Button("كل الفئات") { selectedCategory = "all" }
-                            ForEach(categories) { category in
-                                Button(category.name) { selectedCategory = category.key }
-                            }
-                        } label: {
-                            Label(selectedCategory == "all" ? "كل الفئات" : (categories.first { $0.key == selectedCategory }?.name ?? "الفئة"), systemImage: "line.3.horizontal.decrease.circle.fill")
-                                .font(.subheadline.bold()).lineLimit(1)
-                                .padding(.horizontal, 13).frame(height: 42)
-                                .background(BlofyTheme.surfaceRaised, in: RoundedRectangle(cornerRadius: 14))
-                                .overlay(RoundedRectangle(cornerRadius: 14).stroke(BlofyTheme.divider))
-                        }
-                        Spacer()
-                    }.padding(.horizontal, 16)
-
-                    LazyVStack(spacing: 8) {
-                        ForEach(shown) { item in
-                            LiveSmartRow(item: item, isSelected: selected?.id == item.id) {
-                                selectedID = item.id
-                            } watch: {
-                                watch(item)
-                            } favorite: {
-                                model.toggleFavorite(item)
-                            }
-                        }
-                    }.padding(.horizontal, 16).padding(.bottom, 30)
+                    if !recentChannels.isEmpty { recentStrip }
+                    filters
+                    channelList
                 }
             }
             .background(BlofyTheme.backgroundGradient)
@@ -208,6 +160,91 @@ struct LiveExperienceView: View {
                 if let selected { startPreview(selected) }
             }) { PlayerScreen(session: $0) }
         }
+    }
+
+    private var header: some View {
+        HStack {
+            BlofyBrandMark(compact: true)
+            Spacer()
+            VStack(alignment: .trailing, spacing: 2) {
+                Text("البث المباشر").font(.title2.bold())
+                Text("\(shown.count) قناة").font(.caption2).foregroundStyle(BlofyTheme.textMuted)
+            }
+        }
+        .padding(.horizontal, 16).padding(.top, 8)
+    }
+
+    private var recentStrip: some View {
+        VStack(alignment: .leading, spacing: 9) {
+            HStack {
+                Text("آخر القنوات").font(.headline.bold())
+                Spacer()
+                Text("وصول سريع").font(.caption2).foregroundStyle(BlofyTheme.textMuted)
+            }.padding(.horizontal, 16)
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 10) {
+                    ForEach(recentChannels.prefix(10)) { item in
+                        Button { selectedID = item.id } label: {
+                            HStack(spacing: 8) {
+                                Poster(url: item.poster).frame(width: 40, height: 32).clipShape(RoundedRectangle(cornerRadius: 8))
+                                Text(item.name).font(.caption.bold()).lineLimit(1).frame(maxWidth: 130)
+                            }
+                            .padding(.horizontal, 10).padding(.vertical, 8)
+                            .background(BlofyTheme.surfaceRaised, in: Capsule())
+                            .overlay(Capsule().stroke(selectedID == item.id ? BlofyTheme.purpleBright : BlofyTheme.divider))
+                        }.buttonStyle(.plain).foregroundStyle(BlofyTheme.textPrimary)
+                    }
+                }.padding(.horizontal, 16)
+            }
+        }
+    }
+
+    private var filters: some View {
+        HStack(spacing: 9) {
+            Menu {
+                Button("كل الفئات") { selectedCategory = "all" }
+                ForEach(categories) { category in Button(category.name) { selectedCategory = category.key } }
+            } label: {
+                Label(selectedCategory == "all" ? "كل الفئات" : (categories.first { $0.key == selectedCategory }?.name ?? "الفئة"), systemImage: "line.3.horizontal.decrease.circle.fill")
+                    .font(.subheadline.bold()).lineLimit(1).padding(.horizontal, 13).frame(height: 42)
+                    .background(BlofyTheme.surfaceRaised, in: RoundedRectangle(cornerRadius: 14))
+                    .overlay(RoundedRectangle(cornerRadius: 14).stroke(BlofyTheme.divider))
+            }
+            Button { favoritesOnly.toggle() } label: {
+                Image(systemName: favoritesOnly ? "heart.fill" : "heart")
+                    .frame(width: 42, height: 42)
+                    .background(favoritesOnly ? BlofyTheme.primaryGradient : LinearGradient(colors: [BlofyTheme.surfaceRaised, BlofyTheme.surfaceRaised], startPoint: .leading, endPoint: .trailing), in: RoundedRectangle(cornerRadius: 14))
+                    .foregroundStyle(.white)
+            }.buttonStyle(.plain)
+            Spacer()
+        }.padding(.horizontal, 16)
+    }
+
+    private var channelList: some View {
+        LazyVStack(spacing: 8) {
+            ForEach(shown) { item in
+                LiveSmartRow(item: item, isSelected: selected?.id == item.id) {
+                    selectedID = item.id
+                } watch: {
+                    watch(item)
+                } favorite: {
+                    model.toggleFavorite(item)
+                }
+            }
+            if shown.isEmpty {
+                VStack(spacing: 10) {
+                    Image(systemName: favoritesOnly ? "heart.slash" : "tv.slash").font(.largeTitle).foregroundStyle(BlofyTheme.textMuted)
+                    Text(favoritesOnly ? "ما عندك قنوات مفضلة هنا" : "ما فيه قنوات مطابقة").foregroundStyle(BlofyTheme.textMuted)
+                }.padding(.vertical, 40)
+            }
+        }.padding(.horizontal, 16).padding(.bottom, 30)
+    }
+
+    private func step(_ delta: Int) {
+        guard !shown.isEmpty else { return }
+        let current = shown.firstIndex { $0.id == selected?.id } ?? 0
+        let next = (current + delta + shown.count) % shown.count
+        withAnimation(.easeOut(duration: 0.15)) { selectedID = shown[next].id }
     }
 
     private func select(_ item: MediaItem, autoplay: Bool) async {
@@ -233,13 +270,16 @@ private struct LivePreviewHero: View {
     let item: MediaItem
     let programs: [LiveProgram]
     @ObservedObject var preview: LivePreviewController
+    let isFavorite: Bool
+    let previous: () -> Void
+    let next: () -> Void
+    let favorite: () -> Void
     let watch: () -> Void
 
     var body: some View {
         VStack(spacing: 0) {
             ZStack(alignment: .bottomLeading) {
-                LiveVLCPreviewSurface(player: preview.player)
-                    .frame(height: 210)
+                LiveVLCPreviewSurface(player: preview.player).frame(height: 210)
                 if !preview.ready {
                     Poster(url: item.poster).frame(maxWidth: .infinity).frame(height: 210)
                     ZStack { Color.black.opacity(0.32); ProgressView().tint(BlofyTheme.purpleBright) }
@@ -251,31 +291,38 @@ private struct LivePreviewHero: View {
                         Text("LIVE").font(.caption2.bold())
                     }
                     Text(item.name).font(.title3.bold()).lineLimit(2)
-                    if let now = programs.first {
-                        Text(now.title).font(.caption).foregroundStyle(.white.opacity(0.78)).lineLimit(1)
-                    }
+                    if let now = programs.first { Text(now.title).font(.caption).foregroundStyle(.white.opacity(0.78)).lineLimit(1) }
                 }.padding(14)
             }
 
-            HStack(spacing: 10) {
-                VStack(alignment: .leading, spacing: 4) {
-                    if let now = programs.first {
-                        Text("الآن · \(now.timeText)").font(.caption2.bold()).foregroundStyle(BlofyTheme.mint)
-                        Text(now.title).font(.subheadline.bold()).lineLimit(1)
-                    } else {
-                        Text("دليل البرامج غير متوفر").font(.caption).foregroundStyle(BlofyTheme.textMuted)
+            VStack(spacing: 10) {
+                HStack(spacing: 10) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        if let now = programs.first {
+                            Text("الآن · \(now.timeText)").font(.caption2.bold()).foregroundStyle(BlofyTheme.mint)
+                            Text(now.title).font(.subheadline.bold()).lineLimit(1)
+                            if !now.description.isEmpty { Text(now.description).font(.caption2).foregroundStyle(BlofyTheme.textMuted).lineLimit(2) }
+                        } else {
+                            Text("دليل البرامج غير متوفر").font(.caption).foregroundStyle(BlofyTheme.textMuted)
+                        }
+                        if programs.count > 1 {
+                            let upcoming = programs[1]
+                            Text("التالي · \(upcoming.timeText) · \(upcoming.title)").font(.caption2).foregroundStyle(BlofyTheme.textMuted).lineLimit(1)
+                        }
                     }
-                    if programs.count > 1 {
-                        let next = programs[1]
-                        Text("التالي · \(next.timeText) · \(next.title)").font(.caption2).foregroundStyle(BlofyTheme.textMuted).lineLimit(1)
-                    }
+                    Spacer()
+                    Button(action: favorite) {
+                        Image(systemName: isFavorite ? "heart.fill" : "heart").frame(width: 40, height: 40)
+                            .background(BlofyTheme.surfaceRaised, in: Circle()).foregroundStyle(BlofyTheme.purpleSoft)
+                    }.buttonStyle(.plain)
                 }
-                Spacer()
-                Button(action: watch) {
-                    Image(systemName: "arrow.up.left.and.arrow.down.right")
-                        .font(.headline.bold()).frame(width: 44, height: 44)
-                        .background(BlofyTheme.primaryGradient, in: Circle()).foregroundStyle(.white)
-                }.buttonStyle(.plain)
+
+                HStack(spacing: 10) {
+                    Button(action: previous) { Label("السابق", systemImage: "chevron.right").frame(maxWidth: .infinity) }
+                    Button(action: watch) { Label("ملء الشاشة", systemImage: "arrow.up.left.and.arrow.down.right").frame(maxWidth: .infinity) }
+                    Button(action: next) { Label("التالي", systemImage: "chevron.left").frame(maxWidth: .infinity) }
+                }
+                .font(.caption.bold()).buttonStyle(.bordered).tint(BlofyTheme.purpleBright)
             }.padding(12)
         }
         .background(BlofyTheme.surface.opacity(0.96), in: RoundedRectangle(cornerRadius: 22, style: .continuous))
@@ -323,10 +370,7 @@ private struct LiveSmartRow: View {
 private struct LiveVLCPreviewSurface: UIViewRepresentable {
     let player: VLCMediaPlayer
     func makeUIView(context: Context) -> UIView {
-        let view = UIView(frame: .zero)
-        view.backgroundColor = .black
-        player.drawable = view
-        return view
+        let view = UIView(frame: .zero); view.backgroundColor = .black; player.drawable = view; return view
     }
     func updateUIView(_ uiView: UIView, context: Context) {
         if (player.drawable as AnyObject?) !== uiView { player.drawable = uiView }
@@ -342,22 +386,16 @@ final class LivePreviewController: ObservableObject {
 
     func start(url: URL) {
         if currentURL == url, player.isPlaying { return }
-        stop()
-        currentURL = url
+        stop(); currentURL = url
         guard let media = VLCMedia(url: url) else { return }
         media.addOptions(["network-caching": 650, "no-audio": 1, "http-user-agent": "BLOFY PLAYER/2.0"])
-        player.media = media
-        player.play()
+        player.media = media; player.play()
         timer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
-            Task { @MainActor in
-                guard let self else { return }
-                if self.player.isPlaying { self.ready = true }
-            }
+            Task { @MainActor in guard let self else { return }; if self.player.isPlaying { self.ready = true } }
         }
     }
 
     func stop() {
-        timer?.invalidate(); timer = nil
-        player.stop(); ready = false; currentURL = nil
+        timer?.invalidate(); timer = nil; player.stop(); ready = false; currentURL = nil
     }
 }
