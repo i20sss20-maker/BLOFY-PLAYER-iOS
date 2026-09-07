@@ -8,11 +8,74 @@ struct PlayerTrack: Identifiable, Hashable {
     let name: String
 }
 
+final class PiPManager: NSObject, ObservableObject, AVPictureInPictureControllerDelegate {
+    @Published private(set) var isActive = false
+    @Published private(set) var isPossible = false
+
+    private var controller: AVPictureInPictureController?
+    private weak var attachedLayer: AVPlayerLayer?
+
+    var isSupported: Bool { AVPictureInPictureController.isPictureInPictureSupported() }
+
+    func attach(to layer: AVPlayerLayer) {
+        guard isSupported else { isPossible = false; return }
+        if attachedLayer === layer, controller != nil { refresh(); return }
+        controller?.delegate = nil
+        attachedLayer = layer
+        let next = AVPictureInPictureController(playerLayer: layer)
+        next.delegate = self
+        next.canStartPictureInPictureAutomaticallyFromInline = true
+        controller = next
+        refresh()
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.7) { [weak self] in self?.refresh() }
+    }
+
+    func refresh() {
+        isActive = controller?.isPictureInPictureActive ?? false
+        isPossible = controller?.isPictureInPicturePossible ?? false
+    }
+
+    func toggle() {
+        guard let controller else { return }
+        if controller.isPictureInPictureActive {
+            controller.stopPictureInPicture()
+            return
+        }
+        refresh()
+        if controller.isPictureInPicturePossible {
+            controller.startPictureInPicture()
+        } else {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { [weak self] in
+                guard let self, let controller = self.controller, controller.isPictureInPicturePossible else { self?.refresh(); return }
+                controller.startPictureInPicture()
+            }
+        }
+    }
+
+    func stop() {
+        controller?.stopPictureInPicture()
+        isActive = false
+    }
+
+    func pictureInPictureControllerDidStartPictureInPicture(_ pictureInPictureController: AVPictureInPictureController) {
+        isActive = true; isPossible = true
+    }
+
+    func pictureInPictureControllerDidStopPictureInPicture(_ pictureInPictureController: AVPictureInPictureController) {
+        isActive = false; refresh()
+    }
+
+    func pictureInPictureController(_ pictureInPictureController: AVPictureInPictureController, failedToStartPictureInPictureWithError error: Error) {
+        isActive = false; refresh()
+    }
+}
+
 struct PlayerScreen: View {
     @EnvironmentObject var model: AppModel
     let session: PlaybackSession
     @Environment(\.dismiss) private var dismiss
     @StateObject private var box = PlayerBox()
+    @StateObject private var pip = PiPManager()
     @State private var controlsVisible = true
     @State private var showAudio = false
     @State private var showSubtitles = false
@@ -26,7 +89,7 @@ struct PlayerScreen: View {
             if box.engine == .vlc {
                 VLCVideoSurface(player: box.vlcPlayer).ignoresSafeArea()
             } else {
-                AppleVideoSurface(player: box.player, aspectMode: aspectMode).ignoresSafeArea()
+                AppleVideoSurface(player: box.player, aspectMode: aspectMode, pip: pip).ignoresSafeArea()
             }
 
             Color.clear.contentShape(Rectangle()).onTapGesture {
@@ -36,7 +99,7 @@ struct PlayerScreen: View {
             if controlsVisible {
                 LinearGradient(colors: [.black.opacity(0.72), .clear, .black.opacity(0.84)], startPoint: .top, endPoint: .bottom)
                     .ignoresSafeArea().allowsHitTesting(false)
-                PlayerControlsOverlay(box: box, item: session.item, showAudio: $showAudio, showSubtitles: $showSubtitles, showSpeed: $showSpeed, showEngineBadge: showEngineBadge, dismiss: dismiss)
+                PlayerControlsOverlay(box: box, pip: pip, item: session.item, showAudio: $showAudio, showSubtitles: $showSubtitles, showSpeed: $showSpeed, showEngineBadge: showEngineBadge, dismiss: dismiss)
                     .transition(.opacity)
             }
 
@@ -61,6 +124,7 @@ struct PlayerScreen: View {
         .sheet(isPresented: $showSpeed) { SpeedSheet(box: box) }
         .onAppear { box.start(session: session) }
         .onDisappear {
+            pip.stop()
             model.updateResume(item: session.item, seconds: box.current, duration: box.duration)
             box.stop()
         }
@@ -71,6 +135,7 @@ struct PlayerScreen: View {
 
 private struct PlayerControlsOverlay: View {
     @ObservedObject var box: PlayerBox
+    @ObservedObject var pip: PiPManager
     let item: MediaItem
     @Binding var showAudio: Bool
     @Binding var showSubtitles: Bool
@@ -121,11 +186,14 @@ private struct PlayerControlsOverlay: View {
                     }
                 }
 
-                HStack(spacing: 10) {
+                HStack(spacing: 8) {
                     PlayerToolButton(title: "صوت", icon: "speaker.wave.2.fill", badge: box.audioTracks.count > 1 ? "\(box.audioTracks.count)" : nil) { box.refreshTracks(); showAudio = true }
                     PlayerToolButton(title: "ترجمة", icon: "captions.bubble.fill", badge: box.subtitleTracks.isEmpty ? nil : "\(box.subtitleTracks.count)") { box.refreshTracks(); showSubtitles = true }
                     if item.kind != .live { PlayerToolButton(title: "السرعة", icon: "speedometer", badge: String(format: "%.2fx", box.rate)) { showSpeed = true } }
-                    PlayerToolButton(title: "تحديث", icon: "arrow.clockwise") { box.refreshTracks() }
+                    if box.engine == .apple && pip.isSupported {
+                        PlayerToolButton(title: "PiP", icon: pip.isActive ? "pip.exit" : "pip.enter", badge: pip.isPossible || pip.isActive ? nil : "…") { pip.toggle() }
+                    }
+                    PlayerToolButton(title: "تحديث", icon: "arrow.clockwise") { box.refreshTracks(); pip.refresh() }
                 }
             }
             .padding(14).background(.black.opacity(0.52), in: RoundedRectangle(cornerRadius: 22, style: .continuous))
@@ -228,8 +296,23 @@ private final class PlayerLayerView: UIView {
 private struct AppleVideoSurface: UIViewRepresentable {
     let player: AVPlayer
     let aspectMode: String
-    func makeUIView(context: Context) -> PlayerLayerView { let view = PlayerLayerView(frame: .zero); view.backgroundColor = .black; view.playerLayer.player = player; apply(view.playerLayer); return view }
-    func updateUIView(_ uiView: PlayerLayerView, context: Context) { uiView.playerLayer.player = player; apply(uiView.playerLayer) }
+    @ObservedObject var pip: PiPManager
+
+    func makeUIView(context: Context) -> PlayerLayerView {
+        let view = PlayerLayerView(frame: .zero)
+        view.backgroundColor = .black
+        view.playerLayer.player = player
+        apply(view.playerLayer)
+        pip.attach(to: view.playerLayer)
+        return view
+    }
+
+    func updateUIView(_ uiView: PlayerLayerView, context: Context) {
+        uiView.playerLayer.player = player
+        apply(uiView.playerLayer)
+        pip.attach(to: uiView.playerLayer)
+    }
+
     private func apply(_ layer: AVPlayerLayer) { layer.videoGravity = aspectMode == "fill" || aspectMode == "16:9" ? .resizeAspectFill : .resizeAspect }
 }
 
