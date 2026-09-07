@@ -6,7 +6,7 @@ struct AppRoot: View {
     var body: some View {
         Group {
             if model.activationAllowsUse {
-                RootView()
+                SimpleRootView()
             } else {
                 ZStack {
                     BlofyTheme.backgroundGradient.ignoresSafeArea()
