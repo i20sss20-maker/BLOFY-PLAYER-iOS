@@ -1,7 +1,7 @@
 import SwiftUI
 import AVKit
 import AVFoundation
-import MobileVLCKit
+import VLCKit
 
 struct PlayerScreen: View {
     @EnvironmentObject var model: AppModel
@@ -121,11 +121,8 @@ final class PlayerBox: ObservableObject {
             return
         }
 
-        if shouldPreferVLC(first) {
-            playVLC(url: first, keepPosition: false)
-        } else {
-            playApple(at: 0, keepPosition: false)
-        }
+        if shouldPreferVLC(first) { playVLC(url: first, keepPosition: false) }
+        else { playApple(at: 0, keepPosition: false) }
 
         watchdog = Timer.scheduledTimer(withTimeInterval: 4, repeats: true) { [weak self] _ in
             Task { @MainActor in self?.checkHealth() }
@@ -133,9 +130,7 @@ final class PlayerBox: ObservableObject {
     }
 
     private func shouldPreferVLC(_ url: URL) -> Bool {
-        let ext = url.pathExtension.lowercased()
-        if ["ts", "mkv", "avi", "webm", "flv", "mpeg", "mpg"].contains(ext) { return true }
-        return false
+        ["ts", "mkv", "avi", "webm", "flv", "mpeg", "mpg"].contains(url.pathExtension.lowercased())
     }
 
     private func installTimeObserver() {
@@ -212,18 +207,13 @@ final class PlayerBox: ObservableObject {
             let next = candidates[candidateIndex + 1]
             if shouldPreferVLC(next) { candidateIndex += 1; playVLC(url: next, keepPosition: true) }
             else { playApple(at: candidateIndex + 1, keepPosition: true) }
-        } else {
-            tryVLCFallback()
-        }
+        } else { tryVLCFallback() }
     }
 
     private func tryVLCFallback() {
         let ordered = Array(candidates.dropFirst(candidateIndex)) + Array(candidates.prefix(candidateIndex))
-        if let next = ordered.first(where: { !vlcTried.contains($0.absoluteString) }) {
-            playVLC(url: next, keepPosition: true)
-        } else {
-            statusText = "تعذر تشغيل هذا المحتوى"
-        }
+        if let next = ordered.first(where: { !vlcTried.contains($0.absoluteString) }) { playVLC(url: next, keepPosition: true) }
+        else { statusText = "تعذر تشغيل هذا المحتوى" }
     }
 
     private func playVLC(url: URL, keepPosition: Bool) {
@@ -285,12 +275,9 @@ final class PlayerBox: ObservableObject {
             let stalled = player.timeControlStatus == .waitingToPlayAtSpecifiedRate && now.timeIntervalSince(lastAdvanceAt) >= 12
             let silentLiveStall = isLive && player.timeControlStatus == .playing && now.timeIntervalSince(lastAdvanceAt) >= 12
             if startupWaiting || stalled || silentLiveStall { handleAppleFailure() }
-        } else {
-            let stalled = now.timeIntervalSince(lastAdvanceAt) >= (isLive ? 14 : 18)
-            if stalled {
-                vlcPlayer.stop()
-                tryVLCFallback()
-            }
+        } else if now.timeIntervalSince(lastAdvanceAt) >= (isLive ? 14 : 18) {
+            vlcPlayer.stop()
+            tryVLCFallback()
         }
     }
 
