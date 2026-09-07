@@ -15,6 +15,11 @@ final class AppModel: ObservableObject {
     @Published var language = "ar"
     @Published var autoPlayLive = true
     @Published var liveFormat = "ts"
+    @Published var preferredEngine = "auto"
+    @Published var bufferProfile = "balanced"
+    @Published var showChannelLogos = true
+    @Published var showRatings = true
+    @Published var hapticsEnabled = true
     @Published var deviceID = ""
     @Published var activationCode = ""
     @Published var activationStatus = ""
@@ -51,6 +56,11 @@ final class AppModel: ObservableObject {
         language = defaults.string(forKey: "language") ?? "ar"
         autoPlayLive = defaults.object(forKey: "autoPlayLive") as? Bool ?? true
         liveFormat = defaults.string(forKey: "liveFormat") ?? "ts"
+        preferredEngine = defaults.string(forKey: "preferredEngine") ?? "auto"
+        bufferProfile = defaults.string(forKey: "bufferProfile") ?? "balanced"
+        showChannelLogos = defaults.object(forKey: "showChannelLogos") as? Bool ?? true
+        showRatings = defaults.object(forKey: "showRatings") as? Bool ?? true
+        hapticsEnabled = defaults.object(forKey: "hapticsEnabled") as? Bool ?? true
         restoreCheckpointIfPossible()
     }
 
@@ -75,6 +85,11 @@ final class AppModel: ObservableObject {
         defaults.set(language, forKey: "language")
         defaults.set(autoPlayLive, forKey: "autoPlayLive")
         defaults.set(liveFormat, forKey: "liveFormat")
+        defaults.set(preferredEngine, forKey: "preferredEngine")
+        defaults.set(bufferProfile, forKey: "bufferProfile")
+        defaults.set(showChannelLogos, forKey: "showChannelLogos")
+        defaults.set(showRatings, forKey: "showRatings")
+        defaults.set(hapticsEnabled, forKey: "hapticsEnabled")
     }
 
     func savePlaylists() {
@@ -95,14 +110,7 @@ final class AppModel: ObservableObject {
             error = "أدخل اسم المستخدم وكلمة المرور"
             return
         }
-        let provider = Playlist(
-            name: name.isEmpty ? "BLOFY Playlist" : name,
-            type: type,
-            url: normalizedURL.trimmingCharacters(in: CharacterSet(charactersIn: "/")),
-            username: username.trimmingCharacters(in: .whitespacesAndNewlines),
-            password: password,
-            liveFormat: liveFormat
-        )
+        let provider = Playlist(name: name.isEmpty ? "BLOFY Playlist" : name, type: type, url: normalizedURL.trimmingCharacters(in: CharacterSet(charactersIn: "/")), username: username.trimmingCharacters(in: .whitespacesAndNewlines), password: password, liveFormat: liveFormat)
         playlists.append(provider)
         selected = provider
         clearCatalog()
@@ -127,56 +135,25 @@ final class AppModel: ObservableObject {
     }
 
     func clearCatalog() {
-        categories.removeAll()
-        items.removeAll()
-        completedStages.removeAll()
-        loadedSource = ""
-        progress = 0
-        status = ""
-        error = ""
-        interruptedSync = false
+        categories.removeAll(); items.removeAll(); completedStages.removeAll(); loadedSource = ""; progress = 0; status = ""; error = ""; interruptedSync = false
     }
 
     private func sourceKey(_ playlist: Playlist) -> String { "\(playlist.type)|\(playlist.url)|\(playlist.username)" }
-
-    private func expectedStages(for provider: Playlist) -> Set<String> {
-        provider.type == "m3u" ? ["m3u"] : [ContentKind.live.rawValue, ContentKind.movie.rawValue, ContentKind.series.rawValue]
-    }
+    private func expectedStages(for provider: Playlist) -> Set<String> { provider.type == "m3u" ? ["m3u"] : [ContentKind.live.rawValue, ContentKind.movie.rawValue, ContentKind.series.rawValue] }
 
     private func persistCheckpoint(completed: Bool = false) {
         guard let provider = selected else { return }
-        let checkpoint = CatalogCheckpoint(
-            source: sourceKey(provider),
-            categories: categories,
-            items: items,
-            completedStages: Array(completedStages),
-            progress: progress,
-            status: status,
-            completed: completed,
-            updatedAt: Date()
-        )
-        if let data = try? JSONEncoder().encode(checkpoint) {
-            UserDefaults.standard.set(data, forKey: "catalogCheckpoint")
-        }
+        let checkpoint = CatalogCheckpoint(source: sourceKey(provider), categories: categories, items: items, completedStages: Array(completedStages), progress: progress, status: status, completed: completed, updatedAt: Date())
+        if let data = try? JSONEncoder().encode(checkpoint) { UserDefaults.standard.set(data, forKey: "catalogCheckpoint") }
     }
 
     private func restoreCheckpointIfPossible() {
-        guard let provider = selected,
-              let data = UserDefaults.standard.data(forKey: "catalogCheckpoint"),
-              let checkpoint = try? JSONDecoder().decode(CatalogCheckpoint.self, from: data),
-              checkpoint.source == sourceKey(provider) else { return }
-        categories = checkpoint.categories
-        items = checkpoint.items
-        completedStages = Set(checkpoint.completedStages)
-        progress = checkpoint.progress
-        status = checkpoint.status
+        guard let provider = selected, let data = UserDefaults.standard.data(forKey: "catalogCheckpoint"), let checkpoint = try? JSONDecoder().decode(CatalogCheckpoint.self, from: data), checkpoint.source == sourceKey(provider) else { return }
+        categories = checkpoint.categories; items = checkpoint.items; completedStages = Set(checkpoint.completedStages); progress = checkpoint.progress; status = checkpoint.status
         if checkpoint.completed || completedStages.isSuperset(of: expectedStages(for: provider)) {
-            loadedSource = checkpoint.source
-            progress = 1
-            status = "القوائم جاهزة"
+            loadedSource = checkpoint.source; progress = 1; status = "القوائم جاهزة"
         } else if !items.isEmpty || !completedStages.isEmpty {
-            interruptedSync = true
-            status = "تم استعادة التقدم المحفوظ"
+            interruptedSync = true; status = "تم استعادة التقدم المحفوظ"
         }
     }
 
@@ -195,128 +172,49 @@ final class AppModel: ObservableObject {
     func loadCatalog(force: Bool = false) async {
         guard let provider = selected else { return }
         if loading { return }
-
-        let source = sourceKey(provider)
-        let expected = expectedStages(for: provider)
+        let source = sourceKey(provider); let expected = expectedStages(for: provider)
         if !force && loadedSource == source && !items.isEmpty { return }
-        if !force && completedStages.isSuperset(of: expected) && !items.isEmpty {
-            loadedSource = source
-            progress = 1
-            status = "القوائم جاهزة"
-            persistCheckpoint(completed: true)
-            return
-        }
-
-        if force {
-            categories.removeAll()
-            items.removeAll()
-            completedStages.removeAll()
-            loadedSource = ""
-            progress = 0
-            status = ""
-            UserDefaults.standard.removeObject(forKey: "catalogCheckpoint")
-        }
-
-        loading = true
-        interruptedSync = false
-        error = ""
-        if progress <= 0 { progress = 0.01 }
-        status = completedStages.isEmpty ? "الاتصال بالسيرفر" : "متابعة التحميل من آخر مرحلة"
-        let token = UUID()
-        syncGeneration = token
-
+        if !force && completedStages.isSuperset(of: expected) && !items.isEmpty { loadedSource = source; progress = 1; status = "القوائم جاهزة"; persistCheckpoint(completed: true); return }
+        if force { categories.removeAll(); items.removeAll(); completedStages.removeAll(); loadedSource = ""; progress = 0; status = ""; UserDefaults.standard.removeObject(forKey: "catalogCheckpoint") }
+        loading = true; interruptedSync = false; error = ""; if progress <= 0 { progress = 0.01 }; status = completedStages.isEmpty ? "الاتصال بالسيرفر" : "متابعة التحميل من آخر مرحلة"
+        let token = UUID(); syncGeneration = token
         do {
-            let result = try await ProviderClient.shared.loadCatalog(
-                provider,
-                cachedCategories: categories,
-                cachedItems: items,
-                completedStages: completedStages,
-                progress: { value, text in
-                    await MainActor.run {
-                        guard self.syncGeneration == token else { return }
-                        self.progress = max(self.progress, value)
-                        self.status = text
-                    }
-                },
-                checkpoint: { savedCategories, savedItems, stages, value, text in
-                    await MainActor.run {
-                        guard self.syncGeneration == token else { return }
-                        self.categories = savedCategories
-                        self.items = savedItems
-                        self.completedStages = stages
-                        self.progress = max(self.progress, value)
-                        self.status = text
-                        self.persistCheckpoint(completed: false)
-                    }
-                }
-            )
+            let result = try await ProviderClient.shared.loadCatalog(provider, cachedCategories: categories, cachedItems: items, completedStages: completedStages, progress: { value, text in
+                await MainActor.run { guard self.syncGeneration == token else { return }; self.progress = max(self.progress, value); self.status = text }
+            }, checkpoint: { savedCategories, savedItems, stages, value, text in
+                await MainActor.run { guard self.syncGeneration == token else { return }; self.categories = savedCategories; self.items = savedItems; self.completedStages = stages; self.progress = max(self.progress, value); self.status = text; self.persistCheckpoint(completed: false) }
+            })
             guard syncGeneration == token else { return }
-            categories = result.0
-            items = result.1
-            completedStages = expected
-            loadedSource = source
-            progress = 1
-            status = "تم تحميل القوائم بالكامل"
-            loading = false
-            interruptedSync = false
-            persistCheckpoint(completed: true)
+            categories = result.0; items = result.1; completedStages = expected; loadedSource = source; progress = 1; status = "تم تحميل القوائم بالكامل"; loading = false; interruptedSync = false; persistCheckpoint(completed: true)
         } catch {
             guard syncGeneration == token else { return }
-            self.error = error.localizedDescription
-            self.status = "توقف التحميل مؤقتًا · سنكمل من آخر مرحلة محفوظة"
-            self.loading = false
-            self.interruptedSync = true
-            persistCheckpoint(completed: false)
+            self.error = error.localizedDescription; self.status = "توقف التحميل مؤقتًا · سنكمل من آخر مرحلة محفوظة"; self.loading = false; self.interruptedSync = true; persistCheckpoint(completed: false)
         }
     }
 
     func pauseSyncForBackground() {
         guard loading else { return }
-        syncGeneration = UUID()
-        loading = false
-        interruptedSync = true
-        status = "تم حفظ التقدم · نكمل عند الرجوع للتطبيق"
-        persistCheckpoint(completed: false)
+        syncGeneration = UUID(); loading = false; interruptedSync = true; status = "تم حفظ التقدم · نكمل عند الرجوع للتطبيق"; persistCheckpoint(completed: false)
     }
 
     func resumeSyncIfNeeded() async {
         guard selected != nil else { return }
-        if interruptedSync || (!completedStages.isSuperset(of: expectedStages(for: selected!)) && !items.isEmpty) {
-            await loadCatalog()
-        }
+        if interruptedSync || (!completedStages.isSuperset(of: expectedStages(for: selected!)) && !items.isEmpty) { await loadCatalog() }
     }
 
-    func episodes(for series: MediaItem) async throws -> [MediaItem] {
-        guard let provider = selected else { return [] }
-        return try await ProviderClient.shared.loadEpisodes(series: series, provider: provider)
-    }
-
-    func detailedMovie(_ movie: MediaItem) async -> MediaItem {
-        guard let provider = selected else { return movie }
-        return (try? await ProviderClient.shared.movieInfo(movie: movie, provider: provider)) ?? movie
-    }
+    func episodes(for series: MediaItem) async throws -> [MediaItem] { guard let provider = selected else { return [] }; return try await ProviderClient.shared.loadEpisodes(series: series, provider: provider) }
+    func detailedMovie(_ movie: MediaItem) async -> MediaItem { guard let provider = selected else { return movie }; return (try? await ProviderClient.shared.movieInfo(movie: movie, provider: provider)) ?? movie }
 
     func playbackURL(for item: MediaItem) throws -> URL {
         guard let provider = selected else { throw AppError.message("لا توجد قائمة محددة") }
-        if provider.type == "m3u" {
-            guard let url = URL(string: item.directURL) else { throw AppError.message("رابط التشغيل غير صالح") }
-            return url
-        }
-        let base = provider.url.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
-        let folder = item.kind == .live ? "live" : (item.kind == .episode ? "series" : "movie")
-        let ext = item.kind == .live ? provider.liveFormat : (item.container.isEmpty ? "mp4" : item.container)
-        let raw = "\(base)/\(folder)/\(provider.username)/\(provider.password)/\(item.remoteID).\(ext)"
-        guard let url = URL(string: raw) else { throw AppError.message("تعذر تكوين رابط التشغيل") }
-        return url
+        if provider.type == "m3u" { guard let url = URL(string: item.directURL) else { throw AppError.message("رابط التشغيل غير صالح") }; return url }
+        let base = provider.url.trimmingCharacters(in: CharacterSet(charactersIn: "/")); let folder = item.kind == .live ? "live" : (item.kind == .episode ? "series" : "movie"); let ext = item.kind == .live ? provider.liveFormat : (item.container.isEmpty ? "mp4" : item.container); let raw = "\(base)/\(folder)/\(provider.username)/\(provider.password)/\(item.remoteID).\(ext)"
+        guard let url = URL(string: raw) else { throw AppError.message("تعذر تكوين رابط التشغيل") }; return url
     }
 
     func setLiveFormat(_ format: String) {
         liveFormat = format
         guard var provider = selected, let index = playlists.firstIndex(where: { $0.id == provider.id }) else { saveSettings(); return }
-        provider.liveFormat = format
-        playlists[index] = provider
-        selected = provider
-        savePlaylists()
-        saveSettings()
+        provider.liveFormat = format; playlists[index] = provider; selected = provider; savePlaylists(); saveSettings()
     }
 }
