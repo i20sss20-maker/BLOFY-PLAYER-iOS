@@ -18,7 +18,22 @@ final class AppModel: ObservableObject {
     @Published var deviceID = ""
     @Published var activationCode = ""
     @Published var activationStatus = ""
+
     private var loadedSource = ""
+    private var completedStages = Set<String>()
+    private var syncGeneration = UUID()
+    private var interruptedSync = false
+
+    private struct CatalogCheckpoint: Codable {
+        var source: String
+        var categories: [MediaCategory]
+        var items: [MediaItem]
+        var completedStages: [String]
+        var progress: Double
+        var status: String
+        var completed: Bool
+        var updatedAt: Date
+    }
 
     init() {
         loadLocal()
@@ -36,6 +51,7 @@ final class AppModel: ObservableObject {
         language = defaults.string(forKey: "language") ?? "ar"
         autoPlayLive = defaults.object(forKey: "autoPlayLive") as? Bool ?? true
         liveFormat = defaults.string(forKey: "liveFormat") ?? "ts"
+        restoreCheckpointIfPossible()
     }
 
     private func ensureIdentity() {
@@ -89,7 +105,7 @@ final class AppModel: ObservableObject {
         )
         playlists.append(provider)
         selected = provider
-        loadedSource = ""
+        clearCatalog()
         savePlaylists()
     }
 
@@ -98,22 +114,71 @@ final class AppModel: ObservableObject {
         if selected?.id == playlist.id {
             selected = playlists.first
             clearCatalog()
+            restoreCheckpointIfPossible()
         }
         savePlaylists()
     }
 
     func choose(_ playlist: Playlist) {
+        guard selected?.id != playlist.id else { return }
         selected = playlist
-        if loadedSource != sourceKey(playlist) { clearCatalog() }
+        clearCatalog()
+        restoreCheckpointIfPossible()
     }
 
     func clearCatalog() {
         categories.removeAll()
         items.removeAll()
+        completedStages.removeAll()
         loadedSource = ""
+        progress = 0
+        status = ""
+        error = ""
+        interruptedSync = false
     }
 
     private func sourceKey(_ playlist: Playlist) -> String { "\(playlist.type)|\(playlist.url)|\(playlist.username)" }
+
+    private func expectedStages(for provider: Playlist) -> Set<String> {
+        provider.type == "m3u" ? ["m3u"] : [ContentKind.live.rawValue, ContentKind.movie.rawValue, ContentKind.series.rawValue]
+    }
+
+    private func persistCheckpoint(completed: Bool = false) {
+        guard let provider = selected else { return }
+        let checkpoint = CatalogCheckpoint(
+            source: sourceKey(provider),
+            categories: categories,
+            items: items,
+            completedStages: Array(completedStages),
+            progress: progress,
+            status: status,
+            completed: completed,
+            updatedAt: Date()
+        )
+        if let data = try? JSONEncoder().encode(checkpoint) {
+            UserDefaults.standard.set(data, forKey: "catalogCheckpoint")
+        }
+    }
+
+    private func restoreCheckpointIfPossible() {
+        guard let provider = selected,
+              let data = UserDefaults.standard.data(forKey: "catalogCheckpoint"),
+              let checkpoint = try? JSONDecoder().decode(CatalogCheckpoint.self, from: data),
+              checkpoint.source == sourceKey(provider) else { return }
+        categories = checkpoint.categories
+        items = checkpoint.items
+        completedStages = Set(checkpoint.completedStages)
+        progress = checkpoint.progress
+        status = checkpoint.status
+        if checkpoint.completed || completedStages.isSuperset(of: expectedStages(for: provider)) {
+            loadedSource = checkpoint.source
+            progress = 1
+            status = "القوائم جاهزة"
+        } else if !items.isEmpty || !completedStages.isEmpty {
+            interruptedSync = true
+            status = "تم استعادة التقدم المحفوظ"
+        }
+    }
 
     func toggleFavorite(_ item: MediaItem) {
         if favorites.contains(item.id) { favorites.remove(item.id) } else { favorites.insert(item.id) }
@@ -129,24 +194,96 @@ final class AppModel: ObservableObject {
 
     func loadCatalog(force: Bool = false) async {
         guard let provider = selected else { return }
-        if !force && loadedSource == sourceKey(provider) && !items.isEmpty { return }
+        if loading { return }
+
+        let source = sourceKey(provider)
+        let expected = expectedStages(for: provider)
+        if !force && loadedSource == source && !items.isEmpty { return }
+        if !force && completedStages.isSuperset(of: expected) && !items.isEmpty {
+            loadedSource = source
+            progress = 1
+            status = "القوائم جاهزة"
+            persistCheckpoint(completed: true)
+            return
+        }
+
+        if force {
+            categories.removeAll()
+            items.removeAll()
+            completedStages.removeAll()
+            loadedSource = ""
+            progress = 0
+            status = ""
+            UserDefaults.standard.removeObject(forKey: "catalogCheckpoint")
+        }
+
         loading = true
+        interruptedSync = false
         error = ""
-        progress = 0.02
-        status = "الاتصال بالسيرفر"
+        if progress <= 0 { progress = 0.01 }
+        status = completedStages.isEmpty ? "الاتصال بالسيرفر" : "متابعة التحميل من آخر مرحلة"
+        let token = UUID()
+        syncGeneration = token
+
         do {
-            let result = try await ProviderClient.shared.loadCatalog(provider) { value, text in
-                await MainActor.run { self.progress = value; self.status = text }
-            }
+            let result = try await ProviderClient.shared.loadCatalog(
+                provider,
+                cachedCategories: categories,
+                cachedItems: items,
+                completedStages: completedStages,
+                progress: { value, text in
+                    await MainActor.run {
+                        guard self.syncGeneration == token else { return }
+                        self.progress = max(self.progress, value)
+                        self.status = text
+                    }
+                },
+                checkpoint: { savedCategories, savedItems, stages, value, text in
+                    await MainActor.run {
+                        guard self.syncGeneration == token else { return }
+                        self.categories = savedCategories
+                        self.items = savedItems
+                        self.completedStages = stages
+                        self.progress = max(self.progress, value)
+                        self.status = text
+                        self.persistCheckpoint(completed: false)
+                    }
+                }
+            )
+            guard syncGeneration == token else { return }
             categories = result.0
             items = result.1
-            loadedSource = sourceKey(provider)
+            completedStages = expected
+            loadedSource = source
             progress = 1
-            status = "تم تحميل القوائم"
+            status = "تم تحميل القوائم بالكامل"
+            loading = false
+            interruptedSync = false
+            persistCheckpoint(completed: true)
         } catch {
+            guard syncGeneration == token else { return }
             self.error = error.localizedDescription
+            self.status = "توقف التحميل مؤقتًا · سنكمل من آخر مرحلة محفوظة"
+            self.loading = false
+            self.interruptedSync = true
+            persistCheckpoint(completed: false)
         }
+    }
+
+    func pauseSyncForBackground() {
+        guard loading else { return }
+        syncGeneration = UUID()
         loading = false
+        interruptedSync = true
+        status = "تم حفظ التقدم · نكمل عند الرجوع للتطبيق"
+        persistCheckpoint(completed: false)
+    }
+
+    func resumeSyncIfNeeded() async {
+        guard selected != nil else { return }
+        if interruptedSync || (!completedStages.isSuperset(of: expectedStages(for: selected!)) && !items.isEmpty) {
+            await loadCatalog()
+        }
     }
 
     func episodes(for series: MediaItem) async throws -> [MediaItem] {
