@@ -17,7 +17,13 @@ struct RootView: View {
  var body: some View { NavigationStack { ZStack { Color(red:0.04,green:0.03,blue:0.07).ignoresSafeArea(); VStack(spacing:24){
   Text("BLOFY PLAYER").font(.system(size:34,weight:.black)).foregroundStyle(.white)
   Text("iOS Preview").foregroundStyle(.purple)
-  if model.playlists.isEmpty { ContentUnavailableView("لا توجد قائمة تشغيل",systemImage:"play.rectangle",description:Text("أضف Xtream أو M3U للتجربة")) }
+  if model.playlists.isEmpty {
+   VStack(spacing:12){
+    Image(systemName:"play.rectangle").font(.system(size:42,weight:.semibold)).foregroundColor(.purple)
+    Text("لا توجد قائمة تشغيل").font(.headline)
+    Text("أضف Xtream أو M3U للتجربة").font(.subheadline).foregroundColor(.secondary)
+   }.padding(.vertical,28)
+  }
   else { List(model.playlists){p in NavigationLink { PlaylistView(p:p) } label:{ VStack(alignment:.leading){Text(p.name).font(.headline);Text(p.url).font(.caption).lineLimit(1)} } }.scrollContentBackground(.hidden) }
   Button("إضافة قائمة تشغيل"){showAdd=true}.buttonStyle(.borderedProminent).tint(.purple)
  }}.foregroundStyle(.white) }.sheet(isPresented:$showAdd){AddView(model:model)} }
