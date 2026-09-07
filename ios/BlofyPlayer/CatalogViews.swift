@@ -111,35 +111,84 @@ struct DetailsView: View {
     @EnvironmentObject var model: AppModel
     @State var item: MediaItem
     @State private var play: PlaybackSession?
+    @State private var loadingDetail = false
+
+    private var resumeEntry: ResumeEntry? { model.resume[item.id] }
+    private var resumeProgress: Double {
+        guard let r = resumeEntry, r.duration > 0 else { return 0 }
+        return min(max(r.seconds / r.duration, 0), 1)
+    }
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
                 ZStack(alignment: .bottomLeading) {
-                    Poster(url: item.poster).frame(maxWidth: .infinity).frame(height: item.kind == .live ? 240 : 390).clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
-                    LinearGradient(colors: [.clear, BlofyTheme.background.opacity(0.95)], startPoint: .center, endPoint: .bottom).clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
-                    VStack(alignment: .leading, spacing: 5) {
+                    Poster(url: item.poster)
+                        .frame(maxWidth: .infinity)
+                        .frame(height: item.kind == .live ? 250 : 420)
+                        .clipped()
+                    LinearGradient(colors: [.clear, BlofyTheme.background.opacity(0.98)], startPoint: .center, endPoint: .bottom)
+                    VStack(alignment: .leading, spacing: 8) {
                         Text(item.kind.title.uppercased()).font(.caption2.bold()).tracking(1.8).foregroundStyle(BlofyTheme.purpleBright)
-                        Text(item.name).font(.system(size: 30, weight: .black)).foregroundStyle(BlofyTheme.textPrimary).lineLimit(3)
+                        Text(item.name).font(.system(size: 31, weight: .black)).foregroundStyle(BlofyTheme.textPrimary).lineLimit(3)
+                        HStack(spacing: 10) {
+                            if model.showRatings && !item.rating.isEmpty {
+                                Label(item.rating, systemImage: "star.fill").font(.caption.bold()).foregroundStyle(BlofyTheme.purpleSoft)
+                            }
+                            if !item.container.isEmpty && item.kind != .live {
+                                Text(item.container.uppercased()).font(.caption2.bold()).padding(.horizontal, 8).padding(.vertical, 5).background(BlofyTheme.surfaceRaised, in: Capsule()).foregroundStyle(BlofyTheme.textSecondary)
+                            }
+                        }
                     }.padding(18)
                 }
-                if model.showRatings && !item.rating.isEmpty { Label(item.rating, systemImage: "star.fill").font(.subheadline.bold()).foregroundStyle(BlofyTheme.purpleSoft) }
-                if !item.plot.isEmpty { Text(item.plot).font(.body).foregroundStyle(BlofyTheme.textSecondary).lineSpacing(4) }
+                .clipShape(RoundedRectangle(cornerRadius: 26, style: .continuous))
+
+                if loadingDetail { ProgressView().tint(BlofyTheme.purpleBright) }
+
+                if let r = resumeEntry, r.duration > 0 {
+                    VStack(alignment: .leading, spacing: 7) {
+                        HStack { Text("متابعة المشاهدة").font(.subheadline.bold()); Spacer(); Text("\(Int(resumeProgress * 100))٪").font(.caption).foregroundStyle(BlofyTheme.textMuted) }
+                        ProgressView(value: resumeProgress).tint(BlofyTheme.purpleBright)
+                    }
+                    .padding(14).blofyPanel(radius: 17)
+                }
+
+                if !item.plot.isEmpty {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("القصة").font(.headline).foregroundStyle(BlofyTheme.textPrimary)
+                        Text(item.plot).font(.body).foregroundStyle(BlofyTheme.textSecondary).lineSpacing(4)
+                    }
+                }
+
                 HStack(spacing: 11) {
                     Button { start() } label: {
-                        Label(model.resume[item.id] == nil ? "تشغيل" : "استئناف", systemImage: "play.fill").font(.headline).frame(maxWidth: .infinity).padding(.vertical, 13).background(BlofyTheme.primaryGradient, in: RoundedRectangle(cornerRadius: 17, style: .continuous))
+                        Label(resumeEntry == nil ? "تشغيل الآن" : "استئناف", systemImage: resumeEntry == nil ? "play.fill" : "arrow.clockwise")
+                            .font(.headline).frame(maxWidth: .infinity).padding(.vertical, 14)
+                            .background(BlofyTheme.primaryGradient, in: RoundedRectangle(cornerRadius: 17, style: .continuous))
                     }.buttonStyle(.plain).foregroundStyle(.white)
                     Button { model.toggleFavorite(item) } label: {
-                        Image(systemName: model.favorites.contains(item.id) ? "heart.fill" : "heart").font(.headline).frame(width: 50, height: 50).background(BlofyTheme.surfaceRaised, in: RoundedRectangle(cornerRadius: 17, style: .continuous))
+                        Image(systemName: model.favorites.contains(item.id) ? "heart.fill" : "heart")
+                            .font(.headline).frame(width: 52, height: 52)
+                            .background(BlofyTheme.surfaceRaised, in: RoundedRectangle(cornerRadius: 17, style: .continuous))
                     }.buttonStyle(.plain).foregroundStyle(BlofyTheme.purpleSoft)
                 }
             }.padding(16)
         }
-        .background(BlofyTheme.backgroundGradient.ignoresSafeArea()).navigationTitle(item.name).navigationBarTitleDisplayMode(.inline)
-        .task { if item.kind == .movie { item = await model.detailedMovie(item) } }
+        .background(BlofyTheme.backgroundGradient.ignoresSafeArea())
+        .navigationTitle(item.name).navigationBarTitleDisplayMode(.inline)
+        .task {
+            guard item.kind == .movie else { return }
+            loadingDetail = true
+            item = await model.detailedMovie(item)
+            loadingDetail = false
+        }
         .fullScreenCover(item: $play) { PlayerScreen(session: $0) }
     }
-    private func start() { do { play = try model.makePlaybackSession(for: item) } catch { model.error = error.localizedDescription } }
+
+    private func start() {
+        do { play = try model.makePlaybackSession(for: item) }
+        catch { model.error = error.localizedDescription }
+    }
 }
 
 struct SeriesDetailsView: View {
@@ -148,34 +197,115 @@ struct SeriesDetailsView: View {
     @State private var episodes: [MediaItem] = []
     @State private var loading = true
     @State private var error = ""
+    @State private var selectedSeason: Int?
+    @State private var play: PlaybackSession?
+
     private var seasons: [Int] { Array(Set(episodes.map { $0.season })).sorted() }
+    private var visibleEpisodes: [MediaItem] {
+        guard let selectedSeason else { return episodes }
+        return episodes.filter { $0.season == selectedSeason }
+    }
+    private var resumableEpisode: MediaItem? {
+        let saved = episodes.compactMap { ep -> (MediaItem, Date)? in
+            guard let r = model.resume[ep.id] else { return nil }
+            return (ep, r.updatedAt)
+        }
+        return saved.sorted { $0.1 > $1.1 }.first?.0
+    }
+    private var nextEpisode: MediaItem? {
+        if let resumableEpisode { return resumableEpisode }
+        return episodes.first
+    }
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
-                Poster(url: series.poster).frame(maxWidth: .infinity).frame(height: 350).clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
-                Text(series.name).font(.system(size: 30, weight: .black)).foregroundStyle(BlofyTheme.textPrimary)
-                Button { model.toggleFavorite(series) } label: { Label(model.favorites.contains(series.id) ? "إزالة من المفضلة" : "إضافة للمفضلة", systemImage: model.favorites.contains(series.id) ? "heart.fill" : "heart") }.buttonStyle(.bordered).tint(BlofyTheme.purpleBright)
+                ZStack(alignment: .bottomLeading) {
+                    Poster(url: series.poster).frame(maxWidth: .infinity).frame(height: 370).clipped()
+                    LinearGradient(colors: [.clear, BlofyTheme.background.opacity(0.98)], startPoint: .center, endPoint: .bottom)
+                    VStack(alignment: .leading, spacing: 7) {
+                        Text("SERIES").font(.caption2.bold()).tracking(1.8).foregroundStyle(BlofyTheme.purpleBright)
+                        Text(series.name).font(.system(size: 31, weight: .black)).foregroundStyle(BlofyTheme.textPrimary).lineLimit(3)
+                        if !seasons.isEmpty { Text("\(seasons.count) موسم · \(episodes.count) حلقة").font(.caption).foregroundStyle(BlofyTheme.textMuted) }
+                    }.padding(18)
+                }
+                .clipShape(RoundedRectangle(cornerRadius: 26, style: .continuous))
+
+                if let nextEpisode {
+                    Button { start(nextEpisode) } label: {
+                        HStack {
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(resumableEpisode == nil ? "ابدأ المشاهدة" : "استئناف المسلسل").font(.headline)
+                                Text("الموسم \(nextEpisode.season) · الحلقة \(nextEpisode.episode)").font(.caption).opacity(0.8)
+                            }
+                            Spacer(); Image(systemName: "play.fill")
+                        }
+                        .padding(15).background(BlofyTheme.primaryGradient, in: RoundedRectangle(cornerRadius: 18, style: .continuous)).foregroundStyle(.white)
+                    }.buttonStyle(.plain)
+                }
+
+                HStack(spacing: 10) {
+                    Button { model.toggleFavorite(series) } label: {
+                        Label(model.favorites.contains(series.id) ? "في المفضلة" : "إضافة للمفضلة", systemImage: model.favorites.contains(series.id) ? "heart.fill" : "heart")
+                            .font(.subheadline.bold()).frame(maxWidth: .infinity).padding(.vertical, 12)
+                            .background(BlofyTheme.surfaceRaised, in: RoundedRectangle(cornerRadius: 16))
+                    }.buttonStyle(.plain).foregroundStyle(BlofyTheme.textPrimary)
+                }
+
                 if loading { ProgressView("تحميل الحلقات…").tint(BlofyTheme.purpleBright) }
                 if !error.isEmpty { Text(error).foregroundStyle(BlofyTheme.error) }
-                ForEach(seasons, id: \.self) { season in
-                    VStack(alignment: .leading, spacing: 10) {
-                        Text("الموسم \(season)").font(.title3.bold()).foregroundStyle(BlofyTheme.textPrimary)
-                        ForEach(episodes.filter { $0.season == season }) { episode in
-                            NavigationLink { DetailsView(item: episode) } label: {
-                                HStack(spacing: 12) {
-                                    Poster(url: episode.poster).frame(width: 118, height: 70).clipShape(RoundedRectangle(cornerRadius: 12))
-                                    VStack(alignment: .leading, spacing: 4) { Text("الحلقة \(episode.episode)").font(.headline).foregroundStyle(BlofyTheme.textPrimary); Text(episode.name).font(.caption).foregroundStyle(BlofyTheme.textMuted).lineLimit(2) }
-                                    Spacer(); Image(systemName: "chevron.left").font(.caption).foregroundStyle(BlofyTheme.textMuted)
-                                }.padding(10).blofyPanel(radius: 16)
-                            }.buttonStyle(.plain)
+
+                if !seasons.isEmpty {
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 8) {
+                            ForEach(seasons, id: \.self) { season in
+                                Button { withAnimation(.easeOut(duration: 0.15)) { selectedSeason = season } } label: {
+                                    Text("الموسم \(season)").font(.subheadline.bold()).padding(.horizontal, 14).padding(.vertical, 9)
+                                        .background((selectedSeason == season ? BlofyTheme.purple : BlofyTheme.surfaceRaised), in: Capsule())
+                                        .foregroundStyle(.white)
+                                }.buttonStyle(.plain)
+                            }
                         }
+                    }
+                }
+
+                LazyVStack(spacing: 10) {
+                    ForEach(visibleEpisodes) { episode in
+                        Button { start(episode) } label: {
+                            HStack(spacing: 12) {
+                                ZStack(alignment: .bottomLeading) {
+                                    Poster(url: episode.poster).frame(width: 126, height: 76).clipShape(RoundedRectangle(cornerRadius: 12))
+                                    if let r = model.resume[episode.id], r.duration > 0 {
+                                        ProgressView(value: min(max(r.seconds / r.duration, 0), 1)).tint(BlofyTheme.purpleBright).frame(width: 118).padding(4)
+                                    }
+                                }
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text("الحلقة \(episode.episode)").font(.headline).foregroundStyle(BlofyTheme.textPrimary)
+                                    Text(episode.name).font(.caption).foregroundStyle(BlofyTheme.textMuted).lineLimit(2)
+                                    if model.resume[episode.id] != nil { Text("متابعة").font(.caption2.bold()).foregroundStyle(BlofyTheme.mint) }
+                                }
+                                Spacer(); Image(systemName: "play.circle.fill").font(.title3).foregroundStyle(BlofyTheme.purpleSoft)
+                            }
+                            .padding(10).blofyPanel(radius: 16)
+                        }.buttonStyle(.plain)
                     }
                 }
             }.padding(16)
         }
-        .background(BlofyTheme.backgroundGradient.ignoresSafeArea()).navigationTitle(series.name)
-        .task { do { episodes = try await model.episodes(for: series) } catch { self.error = error.localizedDescription }; loading = false }
+        .background(BlofyTheme.backgroundGradient.ignoresSafeArea()).navigationTitle(series.name).navigationBarTitleDisplayMode(.inline)
+        .task {
+            do {
+                episodes = try await model.episodes(for: series)
+                selectedSeason = seasons.first
+            } catch { self.error = error.localizedDescription }
+            loading = false
+        }
+        .fullScreenCover(item: $play) { PlayerScreen(session: $0) }
+    }
+
+    private func start(_ episode: MediaItem) {
+        do { play = try model.makePlaybackSession(for: episode) }
+        catch { self.error = error.localizedDescription }
     }
 }
 
