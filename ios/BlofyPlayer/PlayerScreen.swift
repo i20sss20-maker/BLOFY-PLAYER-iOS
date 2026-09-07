@@ -30,11 +30,12 @@ struct PlayerScreen: View {
             }
 
             Color.clear.contentShape(Rectangle()).onTapGesture {
-                withAnimation(.easeInOut(duration: 0.2)) { controlsVisible.toggle() }
+                withAnimation(.easeInOut(duration: 0.18)) { controlsVisible.toggle() }
             }
 
             if controlsVisible {
-                LinearGradient(colors: [.black.opacity(0.72), .clear, .black.opacity(0.82)], startPoint: .top, endPoint: .bottom).ignoresSafeArea().allowsHitTesting(false)
+                LinearGradient(colors: [.black.opacity(0.72), .clear, .black.opacity(0.84)], startPoint: .top, endPoint: .bottom)
+                    .ignoresSafeArea().allowsHitTesting(false)
                 PlayerControlsOverlay(box: box, item: session.item, showAudio: $showAudio, showSubtitles: $showSubtitles, showSpeed: $showSpeed, showEngineBadge: showEngineBadge, dismiss: dismiss)
                     .transition(.opacity)
             }
@@ -47,15 +48,22 @@ struct PlayerScreen: View {
                         Text(box.statusText).font(.caption.weight(.semibold))
                     }
                     .padding(.horizontal, 14).padding(.vertical, 10)
-                    .background(.black.opacity(0.78), in: Capsule()).foregroundStyle(.white).padding(.bottom, 96)
+                    .background(.black.opacity(0.8), in: Capsule()).foregroundStyle(.white).padding(.bottom, 96)
                 }.allowsHitTesting(false)
             }
         }
-        .sheet(isPresented: $showAudio) { TrackSheet(title: "مسار الصوت", icon: "speaker.wave.2.fill", tracks: box.audioTracks, selected: box.selectedAudioTrack) { box.selectAudio($0) } }
-        .sheet(isPresented: $showSubtitles) { TrackSheet(title: "الترجمة", icon: "captions.bubble.fill", tracks: box.subtitleTracks, selected: box.selectedSubtitleTrack, includesOff: true) { box.selectSubtitle($0) } }
+        .sheet(isPresented: $showAudio) {
+            TrackSheet(title: "مسار الصوت", icon: "speaker.wave.2.fill", tracks: box.audioTracks, selected: box.selectedAudioTrack) { box.selectAudio($0) }
+        }
+        .sheet(isPresented: $showSubtitles) {
+            TrackSheet(title: "الترجمة", icon: "captions.bubble.fill", tracks: box.subtitleTracks, selected: box.selectedSubtitleTrack, includesOff: true) { box.selectSubtitle($0) }
+        }
         .sheet(isPresented: $showSpeed) { SpeedSheet(box: box) }
         .onAppear { box.start(session: session) }
-        .onDisappear { model.updateResume(item: session.item, seconds: box.current, duration: box.duration); box.stop() }
+        .onDisappear {
+            model.updateResume(item: session.item, seconds: box.current, duration: box.duration)
+            box.stop()
+        }
         .preferredColorScheme(.dark)
         .persistentSystemOverlays(.hidden)
     }
@@ -83,25 +91,22 @@ private struct PlayerControlsOverlay: View {
                     HStack(spacing: 6) {
                         Circle().fill(box.engine == .vlc ? BlofyTheme.mint : BlofyTheme.purpleBright).frame(width: 7, height: 7)
                         Text(box.engine == .vlc ? "VLC" : "APPLE").font(.caption2.bold())
-                    }.padding(.horizontal, 10).padding(.vertical, 6).background(.black.opacity(0.55), in: Capsule())
+                    }
+                    .padding(.horizontal, 10).padding(.vertical, 6)
+                    .background(.black.opacity(0.55), in: Capsule())
                 }
             }.padding(.horizontal, 16).padding(.top, 10)
 
             Spacer()
 
             HStack(spacing: 30) {
-                if item.kind != .live {
-                    Button { box.seek(by: -10) } label: { PlayerMainButton(icon: "gobackward.10", size: 28) }
-                }
+                if item.kind != .live { Button { box.seek(by: -10) } label: { PlayerMainButton(icon: "gobackward.10", size: 28) } }
                 Button { box.togglePlay() } label: {
                     Image(systemName: box.isPlaying ? "pause.fill" : "play.fill")
                         .font(.system(size: 31, weight: .bold)).frame(width: 72, height: 72)
-                        .background(.white, in: Circle()).foregroundStyle(.black)
-                        .shadow(color: .black.opacity(0.4), radius: 12)
+                        .background(.white, in: Circle()).foregroundStyle(.black).shadow(color: .black.opacity(0.4), radius: 12)
                 }.buttonStyle(.plain)
-                if item.kind != .live {
-                    Button { box.seek(by: 10) } label: { PlayerMainButton(icon: "goforward.10", size: 28) }
-                }
+                if item.kind != .live { Button { box.seek(by: 10) } label: { PlayerMainButton(icon: "goforward.10", size: 28) } }
             }
 
             Spacer()
@@ -120,7 +125,7 @@ private struct PlayerControlsOverlay: View {
                     PlayerToolButton(title: "صوت", icon: "speaker.wave.2.fill", badge: box.audioTracks.count > 1 ? "\(box.audioTracks.count)" : nil) { box.refreshTracks(); showAudio = true }
                     PlayerToolButton(title: "ترجمة", icon: "captions.bubble.fill", badge: box.subtitleTracks.isEmpty ? nil : "\(box.subtitleTracks.count)") { box.refreshTracks(); showSubtitles = true }
                     if item.kind != .live { PlayerToolButton(title: "السرعة", icon: "speedometer", badge: String(format: "%.2fx", box.rate)) { showSpeed = true } }
-                    PlayerToolButton(title: "المسارات", icon: "slider.horizontal.3") { box.refreshTracks() }
+                    PlayerToolButton(title: "تحديث", icon: "arrow.clockwise") { box.refreshTracks() }
                 }
             }
             .padding(14).background(.black.opacity(0.52), in: RoundedRectangle(cornerRadius: 22, style: .continuous))
@@ -170,12 +175,8 @@ private struct TrackSheet: View {
     var body: some View {
         NavigationStack {
             List {
-                if includesOff {
-                    Button { select(-1); dismiss() } label: { TrackRow(name: "إيقاف الترجمة", selected: selected == -1, icon: "captions.bubble") }
-                }
-                ForEach(tracks) { track in
-                    Button { select(track.id); dismiss() } label: { TrackRow(name: track.name, selected: selected == track.id, icon: icon) }
-                }
+                if includesOff { Button { select(-1); dismiss() } label: { TrackRow(name: "إيقاف الترجمة", selected: selected == -1, icon: "captions.bubble") } }
+                ForEach(tracks) { track in Button { select(track.id); dismiss() } label: { TrackRow(name: track.name, selected: selected == track.id, icon: icon) } }
                 if tracks.isEmpty { Text("لا توجد مسارات متاحة في هذا المحتوى").foregroundStyle(BlofyTheme.textMuted) }
             }
             .scrollContentBackground(.hidden).background(BlofyTheme.backgroundGradient)
@@ -192,8 +193,7 @@ private struct TrackRow: View {
     var body: some View {
         HStack(spacing: 12) {
             Image(systemName: icon).foregroundStyle(BlofyTheme.purpleSoft).frame(width: 26)
-            Text(name).foregroundStyle(.white)
-            Spacer()
+            Text(name).foregroundStyle(.white); Spacer()
             if selected { Image(systemName: "checkmark.circle.fill").foregroundStyle(BlofyTheme.mint) }
         }
     }
@@ -228,11 +228,9 @@ private final class PlayerLayerView: UIView {
 private struct AppleVideoSurface: UIViewRepresentable {
     let player: AVPlayer
     let aspectMode: String
-    func makeUIView(context: Context) -> PlayerLayerView {
-        let view = PlayerLayerView(frame: .zero); view.backgroundColor = .black; view.playerLayer.player = player; apply(view.playerLayer); return view
-    }
+    func makeUIView(context: Context) -> PlayerLayerView { let view = PlayerLayerView(frame: .zero); view.backgroundColor = .black; view.playerLayer.player = player; apply(view.playerLayer); return view }
     func updateUIView(_ uiView: PlayerLayerView, context: Context) { uiView.playerLayer.player = player; apply(uiView.playerLayer) }
-    private func apply(_ layer: AVPlayerLayer) { layer.videoGravity = aspectMode == "fill" ? .resizeAspectFill : (aspectMode == "16:9" ? .resizeAspectFill : .resizeAspect) }
+    private func apply(_ layer: AVPlayerLayer) { layer.videoGravity = aspectMode == "fill" || aspectMode == "16:9" ? .resizeAspectFill : .resizeAspect }
 }
 
 @MainActor
@@ -240,6 +238,7 @@ final class PlayerBox: ObservableObject {
     enum Engine { case apple, vlc }
     let player = AVPlayer()
     let vlcPlayer = VLCMediaPlayer()
+
     @Published var statusText = ""
     @Published var engine: Engine = .apple
     @Published var isPlaying = false
@@ -254,6 +253,7 @@ final class PlayerBox: ObservableObject {
     @AppStorage("preferredAudioLanguage") private var preferredAudioLanguage = "auto"
     @AppStorage("preferredSubtitleLanguage") private var preferredSubtitleLanguage = "auto"
     @AppStorage("autoEnableSubtitles") private var autoEnableSubtitles = false
+    @AppStorage("subtitleScale") private var subtitleScale = 1.0
     @AppStorage("subtitleDelayMs") private var subtitleDelayMs = 0.0
     @AppStorage("defaultPlaybackRate") private var defaultPlaybackRate = 1.0
     @AppStorage("rememberTrackSelection") private var rememberTrackSelection = true
@@ -283,7 +283,8 @@ final class PlayerBox: ObservableObject {
         stop()
         candidates = session.candidates; candidateIndex = 0; retriesOnCurrent = 0; isLive = session.item.kind == .live
         requestedStart = isLive ? 0 : session.start; preferredEngine = session.preferredEngine; bufferProfile = session.bufferProfile
-        current = requestedStart; duration = 0; rate = Float(defaultPlaybackRate); vlcTried.removeAll(); didApplyTrackPreferences = false; installTimeObserver()
+        current = requestedStart; duration = 0; rate = Float(defaultPlaybackRate); vlcTried.removeAll(); didApplyTrackPreferences = false
+        installTimeObserver()
         guard let first = candidates.first else { statusText = "لا يوجد مسار تشغيل صالح"; return }
         if preferredEngine == "vlc" || (preferredEngine == "auto" && shouldPreferVLC(first)) { playVLC(url: first, keepPosition: false) }
         else { playApple(at: 0, keepPosition: false) }
@@ -308,8 +309,7 @@ final class PlayerBox: ObservableObject {
     }
 
     private func makeItem(url: URL) -> AVPlayerItem {
-        let headers = ["User-Agent": "BLOFY PLAYER/2.0", "Accept": "*/*", "Connection": "keep-alive"]
-        let asset = AVURLAsset(url: url, options: ["AVURLAssetHTTPHeaderFieldsKey": headers])
+        let asset = AVURLAsset(url: url, options: ["AVURLAssetHTTPHeaderFieldsKey": ["User-Agent": "BLOFY PLAYER/2.0", "Accept": "*/*", "Connection": "keep-alive"]])
         let item = AVPlayerItem(asset: asset); item.preferredForwardBufferDuration = isLive ? liveAppleBuffer : vodAppleBuffer; item.canUseNetworkResourcesForLiveStreamingWhilePaused = true
         return item
     }
@@ -336,8 +336,7 @@ final class PlayerBox: ObservableObject {
             retriesOnCurrent = 0; let next = candidates[candidateIndex + 1]
             if preferredEngine != "apple" && shouldPreferVLC(next) { candidateIndex += 1; playVLC(url: next, keepPosition: true) }
             else { playApple(at: candidateIndex + 1, keepPosition: true) }
-        } else if preferredEngine != "apple" { tryVLCFallback() }
-        else { statusText = "تعذر تشغيل هذا المحتوى" }
+        } else if preferredEngine != "apple" { tryVLCFallback() } else { statusText = "تعذر تشغيل هذا المحتوى" }
     }
 
     private func tryVLCFallback() {
@@ -353,7 +352,7 @@ final class PlayerBox: ObservableObject {
         vlcTried.insert(url.absoluteString); openedAt = Date(); lastAdvanceAt = Date(); lastPosition = -1; statusText = "تشغيل بمحرك VLC…"
         guard let media = VLCMedia(url: url) else { switching = false; tryVLCFallback(); return }
         media.addOptions(["network-caching": vlcNetworkCache, "http-user-agent": "BLOFY PLAYER/2.0"])
-        vlcPlayer.media = media; vlcPlayer.rate = rate; vlcPlayer.play(); isPlaying = true
+        vlcPlayer.media = media; vlcPlayer.rate = rate; vlcPlayer.currentSubTitleFontScale = Float(subtitleScale); vlcPlayer.currentVideoSubTitleDelay = Int(subtitleDelayMs * 1000); vlcPlayer.play(); isPlaying = true
         if !isLive { let seek = keepPosition ? current : requestedStart; if seek > 0 { DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { [weak self] in self?.vlcPlayer.time = VLCTime(int: Int32(seek * 1000)) } } }
         vlcTimer?.invalidate(); vlcTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in Task { @MainActor in self?.pollVLC() } }; switching = false
     }
@@ -372,7 +371,7 @@ final class PlayerBox: ObservableObject {
         else { if vlcPlayer.isPlaying { vlcPlayer.pause(); isPlaying = false } else { vlcPlayer.play(); vlcPlayer.rate = rate; isPlaying = true } }
     }
 
-    func seek(by delta: Double) { guard !isLive else { return }; seek(to: max(0, min(duration > 0 ? duration : current + delta, current + delta))) }
+    func seek(by delta: Double) { guard !isLive else { return }; seek(to: max(0, duration > 0 ? min(duration, current + delta) : current + delta)) }
     func seek(to seconds: Double) {
         guard !isLive else { return }; let target = max(0, duration > 0 ? min(duration, seconds) : seconds); current = target
         if engine == .apple { player.seek(to: CMTime(seconds: target, preferredTimescale: 600), toleranceBefore: CMTime(seconds: 0.25, preferredTimescale: 600), toleranceAfter: CMTime(seconds: 0.25, preferredTimescale: 600)) }
@@ -383,14 +382,13 @@ final class PlayerBox: ObservableObject {
 
     func refreshTracks() {
         if engine == .vlc {
-            let audioNames = (vlcPlayer.audioTrackNames as? [String]) ?? []
-            let audioIDs = (vlcPlayer.audioTrackIndexes as? [NSNumber]) ?? []
-            audioTracks = zip(audioIDs, audioNames).map { PlayerTrack(id: $0.0.intValue, name: cleanTrackName($0.1, fallback: "صوت")) }
-            let subNames = (vlcPlayer.videoSubTitlesNames as? [String]) ?? []
-            let subIDs = (vlcPlayer.videoSubTitlesIndexes as? [NSNumber]) ?? []
-            subtitleTracks = zip(subIDs, subNames).filter { $0.0.intValue >= 0 }.map { PlayerTrack(id: $0.0.intValue, name: cleanTrackName($0.1, fallback: "ترجمة")) }
-            selectedAudioTrack = Int(vlcPlayer.currentAudioTrackIndex)
-            selectedSubtitleTrack = Int(vlcPlayer.currentVideoSubTitleIndex)
+            let rawAudio: [VLCMediaPlayerTrack] = vlcPlayer.audioTracks
+            audioTracks = rawAudio.enumerated().map { PlayerTrack(id: $0.offset, name: cleanTrackName($0.element.trackName, fallback: "صوت \($0.offset + 1)")) }
+            selectedAudioTrack = rawAudio.firstIndex(where: { $0.isSelectedExclusively }) ?? -1
+
+            let rawText: [VLCMediaPlayerTrack] = vlcPlayer.textTracks
+            subtitleTracks = rawText.enumerated().filter { !isDisabledTrack($0.element.trackName) }.map { PlayerTrack(id: $0.offset, name: cleanTrackName($0.element.trackName, fallback: "ترجمة \($0.offset + 1)")) }
+            if let selected = rawText.firstIndex(where: { $0.isSelectedExclusively && !isDisabledTrack($0.trackName) }) { selectedSubtitleTrack = selected } else { selectedSubtitleTrack = -1 }
         } else if let item = player.currentItem {
             if let group = item.asset.mediaSelectionGroup(forMediaCharacteristic: .audible) {
                 audioTracks = group.options.enumerated().map { PlayerTrack(id: $0.offset, name: cleanTrackName($0.element.displayName, fallback: "صوت \($0.offset + 1)")) }
@@ -404,16 +402,22 @@ final class PlayerBox: ObservableObject {
     }
 
     func selectAudio(_ id: Int) {
-        if engine == .vlc { vlcPlayer.currentAudioTrackIndex = Int32(id) }
-        else if let item = player.currentItem, let group = item.asset.mediaSelectionGroup(forMediaCharacteristic: .audible), group.options.indices.contains(id) { item.select(group.options[id], in: group) }
+        if engine == .vlc {
+            let tracks: [VLCMediaPlayerTrack] = vlcPlayer.audioTracks
+            if tracks.indices.contains(id) { tracks[id].isSelectedExclusively = true }
+        } else if let item = player.currentItem, let group = item.asset.mediaSelectionGroup(forMediaCharacteristic: .audible), group.options.indices.contains(id) { item.select(group.options[id], in: group) }
         selectedAudioTrack = id
         if let name = audioTracks.first(where: { $0.id == id })?.name { lastAudioTrackName = name }
     }
 
     func selectSubtitle(_ id: Int) {
         if engine == .vlc {
-            vlcPlayer.currentVideoSubTitleIndex = Int32(id)
-            vlcPlayer.currentVideoSubTitleDelay = Int(subtitleDelayMs * 1000)
+            let tracks: [VLCMediaPlayerTrack] = vlcPlayer.textTracks
+            if id < 0 {
+                if let disabled = tracks.first(where: { isDisabledTrack($0.trackName) }) { disabled.isSelectedExclusively = true }
+                else { tracks.forEach { $0.isSelectedExclusively = false } }
+            } else if tracks.indices.contains(id) { tracks[id].isSelectedExclusively = true }
+            vlcPlayer.currentVideoSubTitleDelay = Int(subtitleDelayMs * 1000); vlcPlayer.currentSubTitleFontScale = Float(subtitleScale)
         } else if let item = player.currentItem, let group = item.asset.mediaSelectionGroup(forMediaCharacteristic: .legible) {
             if id < 0 { item.select(nil, in: group) } else if group.options.indices.contains(id) { item.select(group.options[id], in: group) }
         }
@@ -438,7 +442,8 @@ final class PlayerBox: ObservableObject {
         return tracks.first { track in tokens.contains { track.name.lowercased().contains($0) } } ?? tracks.first
     }
 
-    private func cleanTrackName(_ name: String, fallback: String) -> String { let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines); return trimmed.isEmpty || trimmed.lowercased() == "disabled" ? fallback : trimmed }
+    private func isDisabledTrack(_ name: String) -> Bool { let s = name.lowercased(); return s.contains("disable") || s == "off" || s.contains("deaktiv") }
+    private func cleanTrackName(_ name: String, fallback: String) -> String { let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines); return trimmed.isEmpty ? fallback : trimmed }
 
     private func checkHealth() {
         guard !switching else { return }; let now = Date()
