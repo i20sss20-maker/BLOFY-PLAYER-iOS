@@ -12,30 +12,55 @@ enum PlaybackResolver {
 
         let base = provider.url.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
         let folder: String
-        let ext: String
         switch item.kind {
-        case .live:
-            folder = "live"
-            ext = provider.liveFormat.isEmpty ? "ts" : provider.liveFormat
-        case .episode:
-            folder = "series"
-            ext = item.container.isEmpty ? "mp4" : item.container
-        default:
-            folder = "movie"
-            ext = item.container.isEmpty ? "mp4" : item.container
+        case .live: folder = "live"
+        case .episode: folder = "series"
+        default: folder = "movie"
         }
 
-        let primary = "\(base)/\(folder)/\(encode(provider.username))/\(encode(provider.password))/\(encode(item.remoteID)).\(safeExtension(ext))"
-        raw.append(primary)
+        let userEncoded = encode(provider.username)
+        let passEncoded = encode(provider.password)
+        let idEncoded = encode(item.remoteID)
+        let userRaw = provider.username
+        let passRaw = provider.password
+        let idRaw = item.remoteID
 
-        if item.kind == .live, let alternate = alternateLiveFormat(primary) {
-            raw.append(alternate)
+        if item.kind == .live {
+            let ext = safeExtension(provider.liveFormat.isEmpty ? "ts" : provider.liveFormat)
+            let primary = "\(base)/\(folder)/\(userEncoded)/\(passEncoded)/\(idEncoded).\(ext)"
+            raw.append(primary)
+            if let alternate = alternateLiveFormat(primary) { raw.append(alternate) }
+        } else {
+            // Xtream panels are inconsistent about the VOD/episode container extension.
+            // Try the server-reported extension first, then the common commercial variants.
+            var extensions: [String] = []
+            let reported = safeExtension(item.container)
+            for ext in [reported, "mp4", "mkv", "ts", "m3u8"] where !extensions.contains(ext) {
+                extensions.append(ext)
+            }
+
+            for ext in extensions {
+                raw.append("\(base)/\(folder)/\(userEncoded)/\(passEncoded)/\(idEncoded).\(ext)")
+            }
+
+            // A few Xtream-compatible panels reject percent-encoded path credentials.
+            if userRaw != userEncoded || passRaw != passEncoded || idRaw != idEncoded {
+                for ext in extensions.prefix(3) {
+                    raw.append("\(base)/\(folder)/\(userRaw)/\(passRaw)/\(idRaw).\(ext)")
+                }
+            }
+
+            // Some panels accept the stream id without a suffix.
+            raw.append("\(base)/\(folder)/\(userEncoded)/\(passEncoded)/\(idEncoded)")
         }
 
         if let direct = resolveInternalHost(providerBase: provider.url, source: item.directURL), !direct.isEmpty {
-            raw.append(direct)
+            // Direct source should be tried early for VOD when the panel provides it.
+            if item.kind == .movie || item.kind == .episode { raw.insert(direct, at: 0) }
+            else { raw.append(direct) }
         } else if !item.directURL.isEmpty, !isClearlyInternalHost(of: item.directURL) {
-            raw.append(item.directURL)
+            if item.kind == .movie || item.kind == .episode { raw.insert(item.directURL, at: 0) }
+            else { raw.append(item.directURL) }
         }
 
         return try urls(raw)
@@ -98,6 +123,6 @@ enum PlaybackResolver {
 
     private static func safeExtension(_ value: String) -> String {
         let filtered = value.filter { $0.isLetter || $0.isNumber }
-        return filtered.isEmpty ? "mp4" : String(filtered.prefix(8))
+        return filtered.isEmpty ? "mp4" : String(filtered.prefix(8)).lowercased()
     }
 }
