@@ -10,6 +10,16 @@ LOGO_URL="https://raw.githubusercontent.com/i20sss20-maker/BLOFY-PLAYER-2.0/rc07
 curl -fL --retry 3 --retry-delay 2 "$LOGO_URL" -o BlofyPlayer/Resources/blofy_logo.png
 [[ -s BlofyPlayer/Resources/blofy_logo.png ]]
 
+# Keep the live page source stable while routing fullscreen live playback through
+# the dedicated channel-zapping wrapper at build time.
+python3 - <<'PY'
+from pathlib import Path
+p = Path('BlofyPlayer/LiveExperienceView.swift')
+s = p.read_text()
+s = s.replace('}) { PlayerScreen(session: $0) }', '}) { LiveFullScreenPlayer(initial: $0) }')
+p.write_text(s)
+PY
+
 VLC_ZIP="build/VLCKit.zip"
 VLC_URL="https://download.videolan.org/cocoapods/unstable/VLCKit-4.0-20260805-1123.zip"
 curl -fL --retry 3 --retry-delay 2 "$VLC_URL" -o "$VLC_ZIP"
@@ -28,7 +38,7 @@ rm -rf build/package && mkdir -p build/package/Payload
 cp -R "$APP" build/package/Payload/
 rm -rf build/package/Payload/BlofyPlayer.app/_CodeSignature
 rm -f build/package/Payload/BlofyPlayer.app/embedded.mobileprovision
-NAME=BLOFY-PLAYER-iOS-0.2.1-unsigned.ipa
+NAME=BLOFY-PLAYER-iOS-0.2.2-unsigned.ipa
 (cd build/package && /usr/bin/ditto -c -k --keepParent Payload "../../dist/$NAME")
 shasum -a 256 "dist/$NAME" > dist/SHA256SUMS.txt
 file "$APP/BlofyPlayer" | tee dist/BINARY_INFO.txt
