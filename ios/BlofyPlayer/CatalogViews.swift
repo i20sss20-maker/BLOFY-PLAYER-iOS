@@ -72,10 +72,8 @@ struct DetailsView: View {
     }
 
     private func start() {
-        do {
-            let url = try model.playbackURL(for: item)
-            play = PlaybackSession(item: item, url: url, start: model.resume[item.id]?.seconds ?? 0)
-        } catch { model.error = error.localizedDescription }
+        do { play = try model.makePlaybackSession(for: item) }
+        catch { model.error = error.localizedDescription }
     }
 }
 
