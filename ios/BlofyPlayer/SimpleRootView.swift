@@ -80,7 +80,7 @@ private struct SimpleHomeView: View {
                     .padding(.horizontal, 16)
                     .padding(.top, 8)
 
-                    HeroHeader()
+                    SimpleHeroCard(tab: $tab)
 
                     VStack(alignment: .leading, spacing: 12) {
                         Text("وش تبي تشاهد؟")
@@ -133,6 +133,60 @@ private struct SimpleHomeView: View {
             .toolbar(.hidden, for: .navigationBar)
             .refreshable { await model.loadCatalog(force: true) }
         }
+    }
+}
+
+private struct SimpleHeroCard: View {
+    @EnvironmentObject var model: AppModel
+    @Binding var tab: Int
+
+    private var featured: MediaItem? {
+        model.items.first(where: { $0.kind == .live && !$0.poster.isEmpty }) ?? model.items.first(where: { $0.kind == .live })
+    }
+
+    var body: some View {
+        ZStack(alignment: .bottomLeading) {
+            Group {
+                if let item = featured {
+                    Poster(url: item.poster)
+                } else {
+                    BlofyTheme.heroGradient
+                }
+            }
+            .frame(maxWidth: .infinity)
+            .frame(height: 220)
+            .clipped()
+
+            LinearGradient(colors: [.clear, .black.opacity(0.86)], startPoint: .top, endPoint: .bottom)
+
+            VStack(alignment: .leading, spacing: 8) {
+                Text("BLOFY PLAYER")
+                    .font(.caption.bold())
+                    .foregroundStyle(BlofyTheme.purpleSoft)
+                Text(featured?.name ?? "جاهز للمشاهدة")
+                    .font(.system(size: 25, weight: .black))
+                    .foregroundStyle(.white)
+                    .lineLimit(2)
+                Text(model.selected?.name ?? "")
+                    .font(.caption)
+                    .foregroundStyle(.white.opacity(0.72))
+                    .lineLimit(1)
+                Button { tab = 1 } label: {
+                    Label("فتح البث", systemImage: "play.fill")
+                        .font(.subheadline.bold())
+                        .padding(.horizontal, 15)
+                        .padding(.vertical, 10)
+                        .background(.white, in: Capsule())
+                        .foregroundStyle(.black)
+                }
+                .buttonStyle(.plain)
+            }
+            .padding(18)
+        }
+        .frame(height: 220)
+        .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 24).stroke(BlofyTheme.divider))
+        .padding(.horizontal, 16)
     }
 }
 
