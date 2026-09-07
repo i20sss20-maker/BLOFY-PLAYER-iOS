@@ -93,6 +93,20 @@ struct SettingsView: View {
                         .onChange(of: model.liveFormat) { model.setLiveFormat($0) }
                         Divider().overlay(BlofyTheme.divider)
                         SettingToggleRow(title: "تشغيل البث تلقائيًا", icon: "bolt.fill", isOn: $model.autoPlayLive)
+                        Divider().overlay(BlofyTheme.divider)
+                        NavigationLink {
+                            PlayerAdvancedSettingsView()
+                        } label: {
+                            HStack(spacing: 12) {
+                                Image(systemName: "slider.horizontal.3").foregroundStyle(BlofyTheme.purpleBright).frame(width: 30)
+                                VStack(alignment: .leading, spacing: 3) {
+                                    Text("إعدادات المشغل المتقدمة").font(.subheadline.bold()).foregroundStyle(BlofyTheme.textPrimary)
+                                    Text("الصوت · الترجمة · السرعة · نسبة العرض").font(.caption2).foregroundStyle(BlofyTheme.textMuted)
+                                }
+                                Spacer()
+                                Image(systemName: "chevron.left").font(.caption.bold()).foregroundStyle(BlofyTheme.textMuted)
+                            }.contentShape(Rectangle())
+                        }.buttonStyle(.plain)
                     }
 
                     SettingsCard(title: "المظهر والتجربة", icon: "sparkles") {
@@ -121,8 +135,8 @@ struct SettingsView: View {
                     }
 
                     SettingsCard(title: "حول BLOFY", icon: "info.circle.fill") {
-                        SettingValueRow(title: "النسخة", value: "2.1 iOS Commercial Preview")
-                        Text("محرك هجين Apple + VLC، مع استئناف ومفضلة وتحميل محفوظ وإعدادات تشغيل مستقلة.")
+                        SettingValueRow(title: "النسخة", value: "2.2 iOS Commercial Preview")
+                        Text("محرك هجين Apple + VLC، مع تحكم بالصوت والترجمة والاستئناف والمفضلة وتحميل محفوظ.")
                             .font(.caption).foregroundStyle(BlofyTheme.textMuted).frame(maxWidth: .infinity, alignment: .leading)
                     }
                 }
