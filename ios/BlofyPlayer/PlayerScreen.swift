@@ -1,6 +1,7 @@
 import SwiftUI
 import AVKit
 import AVFoundation
+import MobileVLCKit
 
 struct PlayerScreen: View {
     @EnvironmentObject var model: AppModel
@@ -9,41 +10,84 @@ struct PlayerScreen: View {
     @StateObject private var box = PlayerBox()
 
     var body: some View {
-        ZStack(alignment: .topTrailing) {
-            VideoPlayer(player: box.player).ignoresSafeArea()
-            if !box.statusText.isEmpty {
-                VStack {
+        ZStack {
+            Color.black.ignoresSafeArea()
+
+            if box.engine == .vlc {
+                VLCVideoSurface(player: box.vlcPlayer)
+                    .ignoresSafeArea()
+            } else {
+                VideoPlayer(player: box.player)
+                    .ignoresSafeArea()
+            }
+
+            VStack {
+                HStack {
+                    BlofyBrandMark(compact: true)
                     Spacer()
-                    Text(box.statusText)
-                        .font(.caption.weight(.semibold))
-                        .padding(.horizontal, 14).padding(.vertical, 8)
-                        .background(.black.opacity(0.7), in: Capsule())
-                        .foregroundStyle(.white)
-                        .padding(.bottom, 34)
+                    Text(box.engine == .vlc ? "VLC" : "APPLE")
+                        .font(.caption2.bold())
+                        .foregroundStyle(BlofyTheme.purpleSoft)
+                        .padding(.horizontal, 9).padding(.vertical, 5)
+                        .background(BlofyTheme.surface.opacity(0.88), in: Capsule())
+                    Button { dismiss() } label: {
+                        Image(systemName: "xmark")
+                            .font(.system(size: 16, weight: .black))
+                            .frame(width: 38, height: 38)
+                            .background(.black.opacity(0.62), in: Circle())
+                            .foregroundStyle(.white)
+                    }
+                }
+                .padding(.horizontal, 16).padding(.top, 8)
+
+                Spacer()
+
+                if !box.statusText.isEmpty {
+                    HStack(spacing: 9) {
+                        ProgressView().tint(BlofyTheme.purpleBright)
+                        Text(box.statusText).font(.caption.weight(.semibold))
+                    }
+                    .padding(.horizontal, 14).padding(.vertical, 10)
+                    .background(.black.opacity(0.76), in: Capsule())
+                    .foregroundStyle(.white)
+                    .padding(.bottom, 28)
                 }
             }
-            Button { dismiss() } label: {
-                Image(systemName: "xmark.circle.fill")
-                    .font(.system(size: 34))
-                    .foregroundStyle(.white)
-                    .shadow(radius: 3)
-            }.padding()
         }
         .onAppear { box.start(session: session) }
         .onDisappear {
             model.updateResume(item: session.item, seconds: box.current, duration: box.duration)
             box.stop()
         }
+        .preferredColorScheme(.dark)
+    }
+}
+
+private struct VLCVideoSurface: UIViewRepresentable {
+    let player: VLCMediaPlayer
+    func makeUIView(context: Context) -> UIView {
+        let view = UIView(frame: .zero)
+        view.backgroundColor = .black
+        player.drawable = view
+        return view
+    }
+    func updateUIView(_ uiView: UIView, context: Context) {
+        if (player.drawable as AnyObject?) !== uiView { player.drawable = uiView }
     }
 }
 
 @MainActor
 final class PlayerBox: ObservableObject {
+    enum Engine { case apple, vlc }
+
     let player = AVPlayer()
+    let vlcPlayer = VLCMediaPlayer()
     @Published var statusText = ""
+    @Published var engine: Engine = .apple
 
     private var token: Any?
     private var watchdog: Timer?
+    private var vlcTimer: Timer?
     private var statusObservation: NSKeyValueObservation?
     private var endObserver: NSObjectProtocol?
     private var candidates: [URL] = []
@@ -55,6 +99,7 @@ final class PlayerBox: ObservableObject {
     private var lastAdvanceAt = Date()
     private var lastPosition: Double = -1
     private var switching = false
+    private var vlcTried = Set<String>()
 
     var current: Double = 0
     var duration: Double = 0
@@ -68,16 +113,34 @@ final class PlayerBox: ObservableObject {
         requestedStart = isLive ? 0 : session.start
         current = requestedStart
         duration = 0
+        vlcTried.removeAll()
         installTimeObserver()
-        playCandidate(at: 0, keepPosition: false)
+
+        guard let first = candidates.first else {
+            statusText = "لا يوجد مسار تشغيل صالح"
+            return
+        }
+
+        if shouldPreferVLC(first) {
+            playVLC(url: first, keepPosition: false)
+        } else {
+            playApple(at: 0, keepPosition: false)
+        }
+
         watchdog = Timer.scheduledTimer(withTimeInterval: 4, repeats: true) { [weak self] _ in
             Task { @MainActor in self?.checkHealth() }
         }
     }
 
+    private func shouldPreferVLC(_ url: URL) -> Bool {
+        let ext = url.pathExtension.lowercased()
+        if ["ts", "mkv", "avi", "webm", "flv", "mpeg", "mpg"].contains(ext) { return true }
+        return false
+    }
+
     private func installTimeObserver() {
         token = player.addPeriodicTimeObserver(forInterval: CMTime(seconds: 1, preferredTimescale: 600), queue: .main) { [weak self] time in
-            guard let self else { return }
+            guard let self, self.engine == .apple else { return }
             let now = time.seconds
             if now.isFinite {
                 self.current = now
@@ -94,27 +157,27 @@ final class PlayerBox: ObservableObject {
     }
 
     private func makeItem(url: URL) -> AVPlayerItem {
-        let headers = [
-            "User-Agent": "BLOFY PLAYER/2.0",
-            "Accept": "*/*",
-            "Connection": "keep-alive"
-        ]
+        let headers = ["User-Agent": "BLOFY PLAYER/2.0", "Accept": "*/*", "Connection": "keep-alive"]
         let asset = AVURLAsset(url: url, options: ["AVURLAssetHTTPHeaderFieldsKey": headers])
-        return AVPlayerItem(asset: asset)
+        let item = AVPlayerItem(asset: asset)
+        item.preferredForwardBufferDuration = isLive ? 2 : 8
+        item.canUseNetworkResourcesForLiveStreamingWhilePaused = true
+        return item
     }
 
-    private func playCandidate(at index: Int, keepPosition: Bool) {
+    private func playApple(at index: Int, keepPosition: Bool) {
         guard candidates.indices.contains(index), !switching else {
-            if !candidates.indices.contains(index) { statusText = "تعذر تشغيل هذا المحتوى" }
+            if !candidates.indices.contains(index) { tryVLCFallback() }
             return
         }
         switching = true
+        engine = .apple
+        vlcPlayer.stop()
+        vlcTimer?.invalidate(); vlcTimer = nil
         candidateIndex = index
         let resume = isLive ? 0 : (keepPosition ? current : requestedStart)
         let url = candidates[index]
-        openedAt = Date()
-        lastAdvanceAt = Date()
-        lastPosition = -1
+        openedAt = Date(); lastAdvanceAt = Date(); lastPosition = -1
         statusText = index == 0 ? "جاري التشغيل…" : "تجربة مسار بديل…"
 
         statusObservation?.invalidate()
@@ -124,54 +187,123 @@ final class PlayerBox: ObservableObject {
         statusObservation = item.observe(\.status, options: [.new]) { [weak self] item, _ in
             Task { @MainActor in
                 guard let self else { return }
-                if item.status == .failed { self.handleFailure() }
+                if item.status == .failed { self.handleAppleFailure() }
             }
         }
         endObserver = NotificationCenter.default.addObserver(forName: .AVPlayerItemFailedToPlayToEndTime, object: item, queue: .main) { [weak self] _ in
-            Task { @MainActor in self?.handleFailure() }
+            Task { @MainActor in self?.handleAppleFailure() }
         }
 
         player.pause()
         player.replaceCurrentItem(with: item)
-        if resume > 0 {
-            player.seek(to: CMTime(seconds: resume, preferredTimescale: 600), toleranceBefore: .zero, toleranceAfter: .zero)
-        }
+        if resume > 0 { player.seek(to: CMTime(seconds: resume, preferredTimescale: 600), toleranceBefore: .zero, toleranceAfter: .zero) }
         player.play()
         switching = false
     }
 
-    private func handleFailure() {
-        guard !switching else { return }
+    private func handleAppleFailure() {
+        guard engine == .apple, !switching else { return }
         if retriesOnCurrent < 1 {
             retriesOnCurrent += 1
             statusText = "إعادة محاولة…"
-            playCandidate(at: candidateIndex, keepPosition: true)
+            playApple(at: candidateIndex, keepPosition: true)
         } else if candidateIndex + 1 < candidates.count {
             retriesOnCurrent = 0
-            playCandidate(at: candidateIndex + 1, keepPosition: true)
+            let next = candidates[candidateIndex + 1]
+            if shouldPreferVLC(next) { candidateIndex += 1; playVLC(url: next, keepPosition: true) }
+            else { playApple(at: candidateIndex + 1, keepPosition: true) }
+        } else {
+            tryVLCFallback()
+        }
+    }
+
+    private func tryVLCFallback() {
+        let ordered = Array(candidates.dropFirst(candidateIndex)) + Array(candidates.prefix(candidateIndex))
+        if let next = ordered.first(where: { !vlcTried.contains($0.absoluteString) }) {
+            playVLC(url: next, keepPosition: true)
         } else {
             statusText = "تعذر تشغيل هذا المحتوى"
         }
     }
 
+    private func playVLC(url: URL, keepPosition: Bool) {
+        switching = true
+        engine = .vlc
+        player.pause(); player.replaceCurrentItem(with: nil)
+        statusObservation?.invalidate(); statusObservation = nil
+        if let endObserver { NotificationCenter.default.removeObserver(endObserver) }
+        endObserver = nil
+        vlcTried.insert(url.absoluteString)
+        openedAt = Date(); lastAdvanceAt = Date(); lastPosition = -1
+        statusText = "تشغيل بمحرك VLC…"
+
+        let media = VLCMedia(url: url)
+        media.addOptions(["network-caching": isLive ? 1200 : 2500, "http-user-agent": "BLOFY PLAYER/2.0"])
+        vlcPlayer.media = media
+        vlcPlayer.play()
+
+        if !isLive {
+            let seek = keepPosition ? current : requestedStart
+            if seek > 0 {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { [weak self] in
+                    self?.vlcPlayer.time = VLCTime(int: Int32(seek * 1000))
+                }
+            }
+        }
+
+        vlcTimer?.invalidate()
+        vlcTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
+            Task { @MainActor in self?.pollVLC() }
+        }
+        switching = false
+    }
+
+    private func pollVLC() {
+        guard engine == .vlc else { return }
+        let millis = Double(vlcPlayer.time.intValue)
+        if millis >= 0 {
+            let seconds = millis / 1000
+            current = seconds
+            if lastPosition < 0 || seconds - lastPosition >= 0.75 {
+                lastPosition = seconds
+                lastAdvanceAt = Date()
+                statusText = ""
+            }
+        }
+        if let media = vlcPlayer.media {
+            let total = Double(media.length.intValue) / 1000
+            if total.isFinite && total > 0 { duration = total }
+        }
+    }
+
     private func checkHealth() {
-        guard player.currentItem != nil, !switching else { return }
+        guard !switching else { return }
         let now = Date()
-        let startupWaiting = lastPosition < 0 && now.timeIntervalSince(openedAt) >= 12
-        let stalled = player.timeControlStatus == .waitingToPlayAtSpecifiedRate && now.timeIntervalSince(lastAdvanceAt) >= 12
-        let silentLiveStall = isLive && player.timeControlStatus == .playing && now.timeIntervalSince(lastAdvanceAt) >= 12
-        if startupWaiting || stalled || silentLiveStall { handleFailure() }
+        if engine == .apple {
+            guard player.currentItem != nil else { return }
+            let startupWaiting = lastPosition < 0 && now.timeIntervalSince(openedAt) >= 10
+            let stalled = player.timeControlStatus == .waitingToPlayAtSpecifiedRate && now.timeIntervalSince(lastAdvanceAt) >= 12
+            let silentLiveStall = isLive && player.timeControlStatus == .playing && now.timeIntervalSince(lastAdvanceAt) >= 12
+            if startupWaiting || stalled || silentLiveStall { handleAppleFailure() }
+        } else {
+            let stalled = now.timeIntervalSince(lastAdvanceAt) >= (isLive ? 14 : 18)
+            if stalled {
+                vlcPlayer.stop()
+                tryVLCFallback()
+            }
+        }
     }
 
     func stop() {
         watchdog?.invalidate(); watchdog = nil
+        vlcTimer?.invalidate(); vlcTimer = nil
         statusObservation?.invalidate(); statusObservation = nil
         if let endObserver { NotificationCenter.default.removeObserver(endObserver) }
         endObserver = nil
         if let token { player.removeTimeObserver(token) }
         token = nil
-        player.pause()
-        player.replaceCurrentItem(with: nil)
+        player.pause(); player.replaceCurrentItem(with: nil)
+        vlcPlayer.stop()
         candidates = []
         switching = false
     }
