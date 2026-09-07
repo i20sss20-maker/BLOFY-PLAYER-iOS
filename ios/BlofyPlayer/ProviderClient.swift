@@ -39,10 +39,20 @@ actor ProviderClient {
         return url
     }
 
-    func loadCatalog(_ provider: Playlist, progress: @escaping @Sendable (Double, String) async -> Void) async throws -> ([MediaCategory], [MediaItem]) {
-        if provider.type == "m3u" { return try await loadM3U(provider, progress: progress) }
+    func loadCatalog(
+        _ provider: Playlist,
+        cachedCategories: [MediaCategory] = [],
+        cachedItems: [MediaItem] = [],
+        completedStages: Set<String> = [],
+        progress: @escaping @Sendable (Double, String) async -> Void,
+        checkpoint: @escaping @Sendable ([MediaCategory], [MediaItem], Set<String>, Double, String) async -> Void
+    ) async throws -> ([MediaCategory], [MediaItem]) {
+        if provider.type == "m3u" {
+            if completedStages.contains("m3u"), !cachedItems.isEmpty { return (cachedCategories, cachedItems) }
+            return try await loadM3U(provider, progress: progress, checkpoint: checkpoint)
+        }
 
-        await progress(0.04, "التحقق من الاشتراك")
+        await progress(0.03, "التحقق من الاشتراك")
         let authData = try await requestData(apiURL(provider))
         guard let root = try JSONSerialization.jsonObject(with: authData) as? [String: Any],
               let info = root["user_info"] as? [String: Any] else {
@@ -54,19 +64,27 @@ actor ProviderClient {
             throw AppError.message("بيانات الاشتراك غير صحيحة أو الاشتراك منتهي")
         }
 
-        var categories: [MediaCategory] = []
-        var items: [MediaItem] = []
-        let jobs: [(ContentKind, String, String)] = [
-            (.live, "get_live_categories", "get_live_streams"),
-            (.movie, "get_vod_categories", "get_vod_streams"),
-            (.series, "get_series_categories", "get_series")
+        var categories = cachedCategories
+        var items = cachedItems
+        var completed = completedStages
+        let jobs: [(ContentKind, String, String, Double, Double)] = [
+            (.live, "get_live_categories", "get_live_streams", 0.08, 0.35),
+            (.movie, "get_vod_categories", "get_vod_streams", 0.36, 0.68),
+            (.series, "get_series_categories", "get_series", 0.69, 0.94)
         ]
 
-        for (index, job) in jobs.enumerated() {
-            let (kind, categoryAction, itemAction) = job
-            await progress(0.12 + Double(index) * 0.27, "تحميل \(kind.title)")
+        for job in jobs {
+            let (kind, categoryAction, itemAction, startProgress, endProgress) = job
+            if completed.contains(kind.rawValue) { continue }
+
+            await progress(startProgress, "تحميل \(kind.title)")
             let categoryData = try await requestData(apiURL(provider, action: categoryAction))
+            await progress(startProgress + (endProgress - startProgress) * 0.25, "قراءة تصنيفات \(kind.title)")
             let itemData = try await requestData(apiURL(provider, action: itemAction))
+            await progress(startProgress + (endProgress - startProgress) * 0.68, "تجهيز \(kind.title)")
+
+            categories.removeAll { $0.kind == kind }
+            items.removeAll { $0.kind == kind }
 
             if let rows = try JSONSerialization.jsonObject(with: categoryData) as? [[String: Any]] {
                 for row in rows {
@@ -96,13 +114,20 @@ actor ProviderClient {
                     rating: first(string(row["rating"]), string(row["rating_5based"]))
                 ))
             }
+
+            for item in items where item.kind == kind && !categories.contains(where: { $0.kind == kind && $0.key == item.categoryID }) {
+                categories.append(MediaCategory(key: item.categoryID, name: "بدون تصنيف", kind: kind))
+            }
+
+            completed.insert(kind.rawValue)
+            let message = "اكتمل \(kind.title)"
+            await progress(endProgress, message)
+            await checkpoint(categories, items, completed, endProgress, message)
         }
 
-        for item in items where !categories.contains(where: { $0.kind == item.kind && $0.key == item.categoryID }) {
-            categories.append(MediaCategory(key: item.categoryID, name: "بدون تصنيف", kind: item.kind))
-        }
         guard !items.isEmpty else { throw AppError.message("السيرفر أعاد قوائم فارغة") }
-        await progress(0.96, "تجهيز الواجهة")
+        await progress(0.98, "حفظ القوائم")
+        await checkpoint(categories, items, completed, 0.98, "حفظ القوائم")
         return (categories, items)
     }
 
@@ -156,10 +181,15 @@ actor ProviderClient {
         return result
     }
 
-    private func loadM3U(_ provider: Playlist, progress: @escaping @Sendable (Double, String) async -> Void) async throws -> ([MediaCategory], [MediaItem]) {
+    private func loadM3U(
+        _ provider: Playlist,
+        progress: @escaping @Sendable (Double, String) async -> Void,
+        checkpoint: @escaping @Sendable ([MediaCategory], [MediaItem], Set<String>, Double, String) async -> Void
+    ) async throws -> ([MediaCategory], [MediaItem]) {
         guard let url = URL(string: provider.url) else { throw AppError.message("رابط M3U غير صالح") }
-        await progress(0.15, "تحميل M3U")
+        await progress(0.08, "الاتصال بقائمة M3U")
         let data = try await requestData(url)
+        await progress(0.42, "تم تنزيل M3U · جاري القراءة")
         guard let text = String(data: data, encoding: .utf8) ?? String(data: data, encoding: .isoLatin1) else {
             throw AppError.message("ترميز M3U غير مدعوم")
         }
@@ -169,7 +199,14 @@ actor ProviderClient {
         var group = "بدون تصنيف"
         var logo = ""
         var seenCategories = Set<String>()
-        for raw in text.split(whereSeparator: \.isNewline) {
+        let lines = text.split(whereSeparator: \.isNewline)
+        let total = max(lines.count, 1)
+
+        for (index, raw) in lines.enumerated() {
+            if index % 1500 == 0 {
+                let parsing = 0.42 + (Double(index) / Double(total)) * 0.50
+                await progress(parsing, "قراءة M3U · \(Int((Double(index) / Double(total)) * 100))٪")
+            }
             let line = String(raw).trimmingCharacters(in: .whitespacesAndNewlines)
             if line.hasPrefix("#EXTINF:") {
                 name = line.split(separator: ",", maxSplits: 1).last.map(String.init) ?? "Stream"
@@ -188,7 +225,8 @@ actor ProviderClient {
             name = ""; logo = ""
         }
         guard !items.isEmpty else { throw AppError.message("قائمة M3U فارغة أو غير صالحة") }
-        await progress(0.95, "تجهيز القوائم")
+        await progress(0.96, "حفظ قائمة M3U")
+        await checkpoint(categories, items, ["m3u"], 0.96, "حفظ قائمة M3U")
         return (categories, items)
     }
 
