@@ -1,11 +1,18 @@
 #!/usr/bin/env bash
 set -euo pipefail
 cd "$(dirname "$0")"
-mkdir -p build dist
-rm -rf BlofyPlayer.xcworkspace Pods Podfile.lock
+mkdir -p build dist Vendor
+rm -rf Vendor/VLCKit* BlofyPlayer.xcodeproj BlofyPlayer.xcworkspace Pods Podfile.lock
+VLC_ZIP="build/VLCKit.zip"
+VLC_URL="https://download.videolan.org/cocoapods/unstable/VLCKit-4.0-20260805-1123.zip"
+curl -fL --retry 3 --retry-delay 2 "$VLC_URL" -o "$VLC_ZIP"
+rm -rf build/vlckit-unpack && mkdir -p build/vlckit-unpack
+/usr/bin/unzip -q "$VLC_ZIP" -d build/vlckit-unpack
+VLC_XCFRAMEWORK="$(find build/vlckit-unpack -name 'VLCKit.xcframework' -type d | head -n 1)"
+[[ -n "$VLC_XCFRAMEWORK" && -d "$VLC_XCFRAMEWORK" ]]
+cp -R "$VLC_XCFRAMEWORK" Vendor/VLCKit.xcframework
 ruby generate_project.rb
-pod install --repo-update
-xcodebuild -workspace BlofyPlayer.xcworkspace -scheme BlofyPlayer -configuration Release -sdk iphoneos -destination 'generic/platform=iOS' -derivedDataPath build/DerivedData CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY='' DEVELOPMENT_TEAM='' ARCHS=arm64 ONLY_ACTIVE_ARCH=NO build 2>&1 | tee build/xcodebuild.log
+xcodebuild -project BlofyPlayer.xcodeproj -scheme BlofyPlayer -configuration Release -sdk iphoneos -destination 'generic/platform=iOS' -derivedDataPath build/DerivedData CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY='' DEVELOPMENT_TEAM='' ARCHS=arm64 ONLY_ACTIVE_ARCH=NO build 2>&1 | tee build/xcodebuild.log
 APP=build/DerivedData/Build/Products/Release-iphoneos/BlofyPlayer.app
 [[ -d "$APP" && -s "$APP/BlofyPlayer" ]]
 xcrun lipo "$APP/BlofyPlayer" -verify_arch arm64
