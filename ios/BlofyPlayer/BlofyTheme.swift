@@ -18,8 +18,6 @@ enum BlofyTheme {
     static let textMuted = Color(red: 157/255, green: 149/255, blue: 169/255)
     static let divider = Color(red: 53/255, green: 44/255, blue: 64/255)
 
-    static let officialLogoURL = URL(string: "https://raw.githubusercontent.com/i20sss20-maker/BLOFY-PLAYER-2.0/rc07-commercial-stability/app/src/main/res/drawable-nodpi/blofy_logo.png")!
-
     static var backgroundGradient: LinearGradient {
         LinearGradient(colors: [background, Color(red: 18/255, green: 11/255, blue: 28/255)], startPoint: .topLeading, endPoint: .bottomTrailing)
     }
@@ -54,21 +52,11 @@ struct BlofyBrandMark: View {
 
     var body: some View {
         HStack(spacing: compact ? 7 : 10) {
-            AsyncImage(url: BlofyTheme.officialLogoURL) { phase in
-                if case .success(let image) = phase {
-                    image.resizable().scaledToFit()
-                } else {
-                    ZStack {
-                        RoundedRectangle(cornerRadius: compact ? 9 : 12, style: .continuous)
-                            .fill(BlofyTheme.primaryGradient)
-                        Image(systemName: "play.fill")
-                            .font(.system(size: compact ? 13 : 18, weight: .black))
-                            .foregroundStyle(.white)
-                    }
-                }
-            }
-            .frame(width: compact ? 36 : 54, height: compact ? 36 : 54)
-            .clipShape(RoundedRectangle(cornerRadius: compact ? 9 : 13, style: .continuous))
+            Image("blofy_logo")
+                .resizable()
+                .scaledToFit()
+                .frame(width: compact ? 38 : 58, height: compact ? 38 : 58)
+                .clipShape(RoundedRectangle(cornerRadius: compact ? 9 : 13, style: .continuous))
 
             if !compact {
                 Text("BLOFY PLAYER")
