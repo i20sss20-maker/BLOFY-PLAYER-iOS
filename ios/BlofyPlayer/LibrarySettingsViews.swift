@@ -2,32 +2,190 @@ import SwiftUI
 
 struct LibraryView: View {
     @EnvironmentObject var model: AppModel
+    @State private var filter = "all"
+
     private var favoriteItems: [MediaItem] { model.items.filter { model.favorites.contains($0.id) } }
+    private var resumeEntries: [ResumeEntry] { model.resume.values.sorted { $0.updatedAt > $1.updatedAt } }
+    private var filteredFavorites: [MediaItem] {
+        switch filter {
+        case "live": return favoriteItems.filter { $0.kind == .live }
+        case "movie": return favoriteItems.filter { $0.kind == .movie }
+        case "series": return favoriteItems.filter { $0.kind == .series || $0.kind == .episode }
+        default: return favoriteItems
+        }
+    }
 
     var body: some View {
         NavigationStack {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 22) {
-                    HStack { BlofyBrandMark(); Spacer(); Text("مكتبتي").font(.title2.bold()) }
-                        .padding(.horizontal, 16).padding(.top, 8)
-                    if !model.resume.isEmpty {
-                        SectionRow(title: "متابعة المشاهدة", subtitle: "كمل من حيث توقفت", items: model.resume.values.sorted { $0.updatedAt > $1.updatedAt }.map { $0.item })
-                    }
-                    if favoriteItems.isEmpty {
-                        VStack(spacing: 12) {
-                            Image(systemName: "heart.slash").font(.system(size: 42)).foregroundStyle(BlofyTheme.textMuted)
-                            Text("ما عندك مفضلة إلى الآن").font(.headline)
-                            Text("اضغط القلب على أي فيلم أو مسلسل أو قناة").font(.caption).foregroundStyle(BlofyTheme.textMuted)
+                    HStack {
+                        BlofyBrandMark()
+                        Spacer()
+                        VStack(alignment: .trailing, spacing: 2) {
+                            Text("مكتبتي").font(.title2.bold())
+                            Text("\(favoriteItems.count) مفضلة · \(resumeEntries.count) متابعة")
+                                .font(.caption2).foregroundStyle(BlofyTheme.textMuted)
                         }
-                        .frame(maxWidth: .infinity).padding(.vertical, 44).blofyPanel(radius: 22).padding(.horizontal, 16)
-                    } else {
-                        SectionRow(title: "المفضلة", subtitle: "وصول سريع", items: favoriteItems)
                     }
-                }.padding(.bottom, 30)
+                    .padding(.horizontal, 16).padding(.top, 8)
+
+                    if let latest = resumeEntries.first {
+                        LibraryHero(entry: latest)
+                            .padding(.horizontal, 16)
+                            .transition(.opacity.combined(with: .move(edge: .top)))
+                    }
+
+                    if !resumeEntries.isEmpty {
+                        VStack(alignment: .leading, spacing: 10) {
+                            HStack {
+                                Text("متابعة المشاهدة").font(.headline.bold())
+                                Spacer()
+                                Text("\(resumeEntries.count)").font(.caption2).foregroundStyle(BlofyTheme.textMuted)
+                            }.padding(.horizontal, 16)
+                            ScrollView(.horizontal, showsIndicators: false) {
+                                HStack(spacing: 12) {
+                                    ForEach(resumeEntries, id: \.item.id) { entry in
+                                        ResumeLibraryCard(entry: entry)
+                                    }
+                                }.padding(.horizontal, 16)
+                            }
+                        }
+                    }
+
+                    VStack(alignment: .leading, spacing: 12) {
+                        HStack {
+                            Text("المفضلة").font(.headline.bold())
+                            Spacer()
+                            Menu {
+                                Button("الكل") { withAnimation(.easeInOut(duration: 0.18)) { filter = "all" } }
+                                Button("البث") { withAnimation(.easeInOut(duration: 0.18)) { filter = "live" } }
+                                Button("الأفلام") { withAnimation(.easeInOut(duration: 0.18)) { filter = "movie" } }
+                                Button("المسلسلات") { withAnimation(.easeInOut(duration: 0.18)) { filter = "series" } }
+                            } label: {
+                                Label(filterTitle, systemImage: "line.3.horizontal.decrease.circle.fill")
+                                    .font(.caption.bold())
+                                    .padding(.horizontal, 11).padding(.vertical, 7)
+                                    .background(BlofyTheme.surfaceRaised, in: Capsule())
+                            }
+                            .foregroundStyle(BlofyTheme.textPrimary)
+                        }.padding(.horizontal, 16)
+
+                        if filteredFavorites.isEmpty {
+                            VStack(spacing: 12) {
+                                Image(systemName: "heart.slash").font(.system(size: 42)).foregroundStyle(BlofyTheme.textMuted)
+                                Text("ما فيه عناصر هنا").font(.headline)
+                                Text("أضف قناة أو فيلم أو مسلسل للمفضلة، وبتلقاه هنا مباشرة.")
+                                    .font(.caption).multilineTextAlignment(.center).foregroundStyle(BlofyTheme.textMuted)
+                            }
+                            .frame(maxWidth: .infinity).padding(.vertical, 44).blofyPanel(radius: 22).padding(.horizontal, 16)
+                            .transition(.opacity)
+                        } else {
+                            LazyVGrid(columns: [GridItem(.adaptive(minimum: 132), spacing: 12)], spacing: 14) {
+                                ForEach(filteredFavorites) { item in
+                                    LibraryFavoriteCard(item: item)
+                                        .transition(.scale(scale: 0.96).combined(with: .opacity))
+                                }
+                            }.padding(.horizontal, 16)
+                        }
+                    }
+                }.padding(.bottom, 34)
             }
             .background(BlofyTheme.backgroundGradient)
             .toolbar(.hidden, for: .navigationBar)
         }
+    }
+
+    private var filterTitle: String {
+        switch filter { case "live": return "البث"; case "movie": return "الأفلام"; case "series": return "المسلسلات"; default: return "الكل" }
+    }
+}
+
+private struct LibraryHero: View {
+    @EnvironmentObject var model: AppModel
+    let entry: ResumeEntry
+    @State private var play: PlaybackSession?
+
+    private var progress: Double {
+        guard entry.duration > 0 else { return 0 }
+        return min(max(entry.seconds / entry.duration, 0), 1)
+    }
+
+    var body: some View {
+        ZStack(alignment: .bottomLeading) {
+            Poster(url: entry.item.poster)
+                .frame(maxWidth: .infinity).frame(height: 190).clipped()
+            LinearGradient(colors: [.clear, .black.opacity(0.9)], startPoint: .top, endPoint: .bottom)
+            VStack(alignment: .leading, spacing: 8) {
+                Text("آخر مشاهدة").font(.caption.bold()).foregroundStyle(BlofyTheme.mint)
+                Text(entry.item.name).font(.title3.bold()).lineLimit(2)
+                ProgressView(value: progress).tint(BlofyTheme.purpleBright)
+                HStack {
+                    Text("\(Int(progress * 100))٪").font(.caption2.monospacedDigit()).foregroundStyle(.white.opacity(0.7))
+                    Spacer()
+                    Button {
+                        if let session = try? model.makePlaybackSession(for: entry.item) { play = session }
+                    } label: {
+                        Label("استئناف", systemImage: "play.fill").font(.subheadline.bold())
+                            .padding(.horizontal, 14).padding(.vertical, 9).background(.white, in: Capsule()).foregroundStyle(.black)
+                    }.buttonStyle(.plain)
+                }
+            }.padding(16)
+        }
+        .frame(height: 190)
+        .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 24).stroke(BlofyTheme.divider))
+        .fullScreenCover(item: $play) { PlayerScreen(session: $0) }
+    }
+}
+
+private struct ResumeLibraryCard: View {
+    @EnvironmentObject var model: AppModel
+    let entry: ResumeEntry
+    @State private var play: PlaybackSession?
+    private var progress: Double { entry.duration > 0 ? min(max(entry.seconds / entry.duration, 0), 1) : 0 }
+
+    var body: some View {
+        Button {
+            if let session = try? model.makePlaybackSession(for: entry.item) { play = session }
+        } label: {
+            VStack(alignment: .leading, spacing: 7) {
+                ZStack(alignment: .bottomLeading) {
+                    Poster(url: entry.item.poster).frame(width: 152, height: 92).clipShape(RoundedRectangle(cornerRadius: 14))
+                    ProgressView(value: progress).tint(BlofyTheme.purpleBright).padding(8)
+                }
+                Text(entry.item.name).font(.caption.bold()).foregroundStyle(BlofyTheme.textPrimary).lineLimit(1).frame(width: 152, alignment: .leading)
+                Text("متابعة من \(Int(progress * 100))٪").font(.caption2).foregroundStyle(BlofyTheme.textMuted)
+            }
+        }.buttonStyle(.plain).fullScreenCover(item: $play) { PlayerScreen(session: $0) }
+    }
+}
+
+private struct LibraryFavoriteCard: View {
+    @EnvironmentObject var model: AppModel
+    let item: MediaItem
+    @State private var play: PlaybackSession?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            ZStack(alignment: .topTrailing) {
+                Poster(url: item.poster).aspectRatio(0.72, contentMode: .fill).frame(maxWidth: .infinity).clipShape(RoundedRectangle(cornerRadius: 16))
+                Button { model.toggleFavorite(item) } label: {
+                    Image(systemName: "heart.fill").font(.caption.bold()).frame(width: 32, height: 32)
+                        .background(.black.opacity(0.7), in: Circle()).foregroundStyle(BlofyTheme.purpleSoft)
+                }.buttonStyle(.plain).padding(7)
+            }
+            Text(item.name).font(.caption.bold()).foregroundStyle(BlofyTheme.textPrimary).lineLimit(2)
+            Text(item.kind.title).font(.caption2).foregroundStyle(BlofyTheme.textMuted)
+            if item.kind != .series {
+                Button {
+                    if let session = try? model.makePlaybackSession(for: item) { play = session }
+                } label: { Label("تشغيل", systemImage: "play.fill").font(.caption.bold()).frame(maxWidth: .infinity).padding(.vertical, 8).background(BlofyTheme.primaryGradient, in: RoundedRectangle(cornerRadius: 10)).foregroundStyle(.white) }
+                    .buttonStyle(.plain)
+            }
+        }
+        .padding(10).background(BlofyTheme.surface.opacity(0.9), in: RoundedRectangle(cornerRadius: 18)).overlay(RoundedRectangle(cornerRadius: 18).stroke(BlofyTheme.divider))
+        .fullScreenCover(item: $play) { PlayerScreen(session: $0) }
     }
 }
 
@@ -135,8 +293,8 @@ struct SettingsView: View {
                     }
 
                     SettingsCard(title: "حول BLOFY", icon: "info.circle.fill") {
-                        SettingValueRow(title: "النسخة", value: "2.2 iOS Commercial Preview")
-                        Text("محرك هجين Apple + VLC، مع تحكم بالصوت والترجمة والاستئناف والمفضلة وتحميل محفوظ.")
+                        SettingValueRow(title: "النسخة", value: "2.8 iOS Premium")
+                        Text("محرك هجين Apple + VLC، بث سريع، EPG، مفضلة، متابعة مشاهدة، صوت وترجمة وتحكم متقدم.")
                             .font(.caption).foregroundStyle(BlofyTheme.textMuted).frame(maxWidth: .infinity, alignment: .leading)
                     }
                 }
