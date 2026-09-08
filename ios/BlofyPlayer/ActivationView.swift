@@ -7,93 +7,132 @@ struct ActivationView: View {
     let onSuccess: () -> Void
 
     var body: some View {
-        ScrollView(showsIndicators: false) {
-            VStack(spacing: 24) {
-                Spacer(minLength: 28)
+        ZStack {
+            BlofyTheme.backgroundGradient.ignoresSafeArea()
 
-                VStack(spacing: 12) {
-                    BlofyBrandMark()
-                    Text("أهلًا بك في BLOFY PLAYER")
-                        .font(.system(size: 29, weight: .black))
-                        .foregroundStyle(BlofyTheme.textPrimary)
-                    Text("ادخل لجهازك ثم انتقل للسيرفر والقوائم المحفوظة")
-                        .font(.subheadline)
-                        .multilineTextAlignment(.center)
-                        .foregroundStyle(BlofyTheme.textMuted)
-                }
+            Circle()
+                .fill(BlofyTheme.purple.opacity(0.18))
+                .frame(width: 330, height: 330)
+                .blur(radius: 80)
+                .offset(x: 135, y: -260)
 
-                VStack(spacing: 18) {
-                    HStack(spacing: 14) {
-                        if let image = qrImage {
-                            Image(uiImage: image)
-                                .interpolation(.none)
-                                .resizable()
-                                .scaledToFit()
-                                .frame(width: 116, height: 116)
-                                .padding(10)
-                                .background(.white, in: RoundedRectangle(cornerRadius: 19, style: .continuous))
-                        }
+            Circle()
+                .fill(BlofyTheme.purpleDeep.opacity(0.24))
+                .frame(width: 280, height: 280)
+                .blur(radius: 90)
+                .offset(x: -150, y: 300)
 
-                        VStack(alignment: .leading, spacing: 12) {
-                            LoginValue(title: "رقم الجهاز", value: model.deviceID, strong: false)
-                            LoginValue(title: "رمز الدخول", value: model.activationCode, strong: true)
-                        }
-                        .frame(maxWidth: .infinity, alignment: .leading)
+            ScrollView(showsIndicators: false) {
+                VStack(spacing: 26) {
+                    Spacer(minLength: 34)
+
+                    VStack(spacing: 14) {
+                        BlofyBrandMark()
+                        Text("مشاهدة أبسط. تجربة أقوى.")
+                            .font(.system(size: 25, weight: .black))
+                            .foregroundStyle(BlofyTheme.textPrimary)
+                        Text("اربط جهازك مرة واحدة، وبعدها ادخل لسيرفرك وقوائمك المحفوظة.")
+                            .font(.subheadline)
+                            .multilineTextAlignment(.center)
+                            .foregroundStyle(BlofyTheme.textMuted)
+                            .padding(.horizontal, 14)
                     }
 
-                    Divider().overlay(BlofyTheme.divider)
+                    VStack(spacing: 18) {
+                        HStack(alignment: .center, spacing: 16) {
+                            if let image = qrImage {
+                                VStack(spacing: 7) {
+                                    Image(uiImage: image)
+                                        .interpolation(.none)
+                                        .resizable()
+                                        .scaledToFit()
+                                        .frame(width: 110, height: 110)
+                                        .padding(9)
+                                        .background(.white, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+                                    Text("امسح للدخول")
+                                        .font(.caption2.bold())
+                                        .foregroundStyle(BlofyTheme.textMuted)
+                                }
+                            }
 
-                    HStack(spacing: 9) {
-                        Circle().fill(statusColor).frame(width: 9, height: 9)
-                        Text(statusText)
-                            .font(.subheadline.weight(.semibold))
-                            .foregroundStyle(BlofyTheme.textSecondary)
-                        Spacer()
-                    }
-
-                    Button { Task { await enter() } } label: {
-                        HStack(spacing: 10) {
-                            if checking { ProgressView().tint(.white) }
-                            else { Image(systemName: "arrow.right.circle.fill") }
-                            Text(checking ? "جاري الدخول…" : "دخول إلى BLOFY")
+                            VStack(alignment: .leading, spacing: 14) {
+                                LoginValue(title: "رقم الجهاز", value: model.deviceID, strong: false)
+                                Divider().overlay(BlofyTheme.divider)
+                                LoginValue(title: "رمز الدخول", value: model.activationCode, strong: true)
+                            }
+                            .frame(maxWidth: .infinity, alignment: .leading)
                         }
-                        .font(.headline)
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 15)
-                        .background(BlofyTheme.primaryGradient, in: RoundedRectangle(cornerRadius: 17, style: .continuous))
-                    }
-                    .buttonStyle(.plain)
-                    .foregroundStyle(.white)
-                    .disabled(checking)
 
-                    if let url = PortalClient.activationPortalURL(deviceID: model.deviceID, code: model.activationCode) {
-                        Link(destination: url) {
-                            Label("إدارة القوائم من المتصفح", systemImage: "safari")
+                        HStack(spacing: 9) {
+                            Circle().fill(statusColor).frame(width: 9, height: 9)
+                            Text(statusText)
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(BlofyTheme.textSecondary)
+                            Spacer()
+                        }
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 10)
+                        .background(BlofyTheme.surfaceRaised, in: Capsule())
+
+                        Button { Task { await enter() } } label: {
+                            HStack(spacing: 10) {
+                                if checking { ProgressView().tint(.white) }
+                                else { Image(systemName: "arrow.right") }
+                                Text(checking ? "جاري التحقق…" : "الدخول إلى السيرفر")
+                            }
+                            .font(.headline.bold())
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 16)
+                            .background(BlofyTheme.primaryGradient, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+                        }
+                        .buttonStyle(.plain)
+                        .foregroundStyle(.white)
+                        .disabled(checking)
+                        .opacity(checking ? 0.75 : 1)
+
+                        if let url = PortalClient.activationPortalURL(deviceID: model.deviceID, code: model.activationCode) {
+                            Link(destination: url) {
+                                HStack {
+                                    Image(systemName: "safari")
+                                    Text("إدارة القوائم من المتصفح")
+                                    Spacer()
+                                    Image(systemName: "arrow.up.right")
+                                }
                                 .font(.subheadline.bold())
-                                .frame(maxWidth: .infinity)
+                                .padding(.horizontal, 15)
                                 .padding(.vertical, 13)
                                 .background(BlofyTheme.surfaceRaised, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
                                 .overlay(RoundedRectangle(cornerRadius: 16).stroke(BlofyTheme.divider))
+                            }
+                            .foregroundStyle(BlofyTheme.textSecondary)
                         }
-                        .foregroundStyle(BlofyTheme.purpleSoft)
                     }
-                }
-                .padding(18)
-                .background(BlofyTheme.surface.opacity(0.94), in: RoundedRectangle(cornerRadius: 28, style: .continuous))
-                .overlay(RoundedRectangle(cornerRadius: 28).stroke(BlofyTheme.purpleSoft.opacity(0.22)))
-                .shadow(color: BlofyTheme.purple.opacity(0.12), radius: 24, y: 12)
+                    .padding(19)
+                    .background(
+                        LinearGradient(
+                            colors: [BlofyTheme.surface.opacity(0.97), BlofyTheme.backgroundRaised.opacity(0.98)],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        ),
+                        in: RoundedRectangle(cornerRadius: 30, style: .continuous)
+                    )
+                    .overlay(RoundedRectangle(cornerRadius: 30).stroke(BlofyTheme.purpleSoft.opacity(0.20)))
+                    .shadow(color: .black.opacity(0.28), radius: 28, y: 18)
 
-                Text("تسجيل الخروج لاحقًا يرجعك لهذه الصفحة بدون حذف السيرفرات أو المفضلة.")
-                    .font(.caption)
-                    .multilineTextAlignment(.center)
+                    HStack(spacing: 7) {
+                        Image(systemName: "lock.shield.fill")
+                        Text("بيانات السيرفر والمفضلة تبقى محفوظة على جهازك عند تسجيل الخروج.")
+                    }
+                    .font(.caption2)
                     .foregroundStyle(BlofyTheme.textMuted)
-                    .padding(.horizontal, 12)
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, 10)
 
-                Spacer(minLength: 28)
+                    Spacer(minLength: 30)
+                }
+                .padding(.horizontal, 20)
             }
-            .padding(.horizontal, 20)
         }
-        .background(BlofyTheme.backgroundGradient.ignoresSafeArea())
     }
 
     private var statusColor: Color {
@@ -106,12 +145,12 @@ struct ActivationView: View {
 
     private var statusText: String {
         switch model.activationStatus.lowercased() {
-        case "active": return "الجهاز مفعّل وجاهز"
+        case "active": return "الجهاز مفعّل وجاهز للدخول"
         case "trial": return "الفترة التجريبية فعالة"
         case "expired": return "انتهت مدة التفعيل"
         case "blocked": return "الجهاز موقوف"
         case "offline": return "تعذر التحقق من الخدمة"
-        default: return "اضغط دخول للتحقق من الجهاز"
+        default: return "جاهز للتحقق من الجهاز"
         }
     }
 
@@ -153,14 +192,14 @@ private struct LoginValue: View {
     let strong: Bool
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
+        VStack(alignment: .leading, spacing: 5) {
             Text(title)
                 .font(.caption2.bold())
                 .foregroundStyle(BlofyTheme.textMuted)
             Text(value)
                 .font(.system(size: strong ? 24 : 15, weight: .black, design: .monospaced))
                 .foregroundStyle(strong ? BlofyTheme.purpleBright : BlofyTheme.textPrimary)
-                .minimumScaleFactor(0.66)
+                .minimumScaleFactor(0.62)
                 .lineLimit(1)
         }
     }
