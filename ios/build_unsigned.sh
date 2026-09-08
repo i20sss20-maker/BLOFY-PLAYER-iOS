@@ -64,7 +64,7 @@ cp -R "$APP" build/package/Payload/
 rm -rf build/package/Payload/BlofyPlayer.app/_CodeSignature
 rm -f build/package/Payload/BlofyPlayer.app/embedded.mobileprovision
 
-NAME=BLOFY-PLAYER-iOS-0.3.0-unsigned.ipa
+NAME=BLOFY-PLAYER-iOS-0.3.1-unsigned.ipa
 (cd build/package && /usr/bin/ditto -c -k --keepParent Payload "../../dist/$NAME")
 shasum -a 256 "dist/$NAME" > dist/SHA256SUMS.txt
 file "$APP/BlofyPlayer" | tee dist/BINARY_INFO.txt
