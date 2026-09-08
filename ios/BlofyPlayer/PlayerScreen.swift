@@ -146,6 +146,8 @@ private struct PlayerControlsOverlay: View {
     @Binding var showSpeed: Bool
     let showEngineBadge: Bool
     let dismiss: DismissAction
+    @State private var isScrubbing = false
+    @State private var scrubTarget: Double = 0
 
     var body: some View {
         VStack(spacing: 0) {
@@ -183,9 +185,25 @@ private struct PlayerControlsOverlay: View {
             VStack(spacing: 12) {
                 if item.kind != .live && box.duration > 0 {
                     VStack(spacing: 5) {
-                        Slider(value: Binding(get: { box.current }, set: { box.seek(to: $0) }), in: 0...max(box.duration, 1)).tint(BlofyTheme.purpleBright)
+                        Slider(
+                            value: Binding(
+                                get: { isScrubbing ? scrubTarget : box.current },
+                                set: { scrubTarget = $0 }
+                            ),
+                            in: 0...max(box.duration, 1),
+                            onEditingChanged: { editing in
+                                if editing {
+                                    isScrubbing = true
+                                    scrubTarget = box.current
+                                } else {
+                                    let target = scrubTarget
+                                    isScrubbing = false
+                                    box.seek(to: target)
+                                }
+                            }
+                        ).tint(BlofyTheme.purpleBright)
                         HStack {
-                            Text(playerTime(box.current)); Spacer(); Text("-" + playerTime(max(0, box.duration - box.current)))
+                            Text(playerTime(isScrubbing ? scrubTarget : box.current)); Spacer(); Text("-" + playerTime(max(0, box.duration - (isScrubbing ? scrubTarget : box.current))))
                         }.font(.caption2.monospacedDigit()).foregroundStyle(.white.opacity(0.66))
                     }
                 }
@@ -365,12 +383,14 @@ final class PlayerBox: ObservableObject {
     private var preferredEngine = "auto"
     private var bufferProfile = "balanced"
     private var didApplyTrackPreferences = false
+    private var seekGeneration = 0
+    private var currentPlaybackURL: URL?
 
     func start(session: PlaybackSession) {
         stop()
         candidates = session.candidates; candidateIndex = 0; retriesOnCurrent = 0; isLive = session.item.kind == .live
         requestedStart = isLive ? 0 : session.start; preferredEngine = session.preferredEngine; bufferProfile = session.bufferProfile
-        current = requestedStart; duration = 0; rate = Float(defaultPlaybackRate); vlcTried.removeAll(); didApplyTrackPreferences = false
+        current = requestedStart; duration = 0; rate = Float(defaultPlaybackRate); vlcTried.removeAll(); didApplyTrackPreferences = false; seekGeneration = 0
         installTimeObserver()
         guard let first = candidates.first else { statusText = "لا يوجد مسار تشغيل صالح"; return }
         if preferredEngine == "vlc" || (preferredEngine == "auto" && shouldPreferVLC(first)) { playVLC(url: first, keepPosition: false) }
@@ -396,7 +416,7 @@ final class PlayerBox: ObservableObject {
     }
 
     private func makeItem(url: URL) -> AVPlayerItem {
-        let asset = AVURLAsset(url: url, options: ["AVURLAssetHTTPHeaderFieldsKey": ["User-Agent": "BLOFY PLAYER/2.0", "Accept": "*/*", "Connection": "keep-alive"]])
+        let asset = AVURLAsset(url: url, options: ["AVURLAssetHTTPHeaderFieldsKey": ["User-Agent": "BLOFY PLAYER/2.9", "Accept": "*/*", "Connection": "keep-alive"]])
         let item = AVPlayerItem(asset: asset); item.preferredForwardBufferDuration = isLive ? liveAppleBuffer : vodAppleBuffer; item.canUseNetworkResourcesForLiveStreamingWhilePaused = true
         return item
     }
@@ -405,6 +425,7 @@ final class PlayerBox: ObservableObject {
         guard candidates.indices.contains(index), !switching else { if !candidates.indices.contains(index) { tryVLCFallback() }; return }
         switching = true; engine = .apple; vlcPlayer.stop(); vlcTimer?.invalidate(); vlcTimer = nil; candidateIndex = index; audioTracks = []; subtitleTracks = []
         let resume = isLive ? 0 : (keepPosition ? current : requestedStart); let url = candidates[index]
+        currentPlaybackURL = url
         openedAt = Date(); lastAdvanceAt = Date(); lastPosition = -1; statusText = index == 0 ? "جاري التشغيل…" : "تجربة مسار بديل…"
         statusObservation?.invalidate(); if let endObserver { NotificationCenter.default.removeObserver(endObserver) }
         let item = makeItem(url: url)
@@ -436,9 +457,9 @@ final class PlayerBox: ObservableObject {
     private func playVLC(url: URL, keepPosition: Bool) {
         switching = true; engine = .vlc; player.pause(); player.replaceCurrentItem(with: nil); statusObservation?.invalidate(); statusObservation = nil; audioTracks = []; subtitleTracks = []
         if let endObserver { NotificationCenter.default.removeObserver(endObserver) }; endObserver = nil
-        vlcTried.insert(url.absoluteString); openedAt = Date(); lastAdvanceAt = Date(); lastPosition = -1; statusText = "تشغيل بمحرك VLC…"
+        vlcTried.insert(url.absoluteString); currentPlaybackURL = url; openedAt = Date(); lastAdvanceAt = Date(); lastPosition = -1; statusText = "تشغيل بمحرك VLC…"
         guard let media = VLCMedia(url: url) else { switching = false; tryVLCFallback(); return }
-        media.addOptions(["network-caching": vlcNetworkCache, "http-user-agent": "BLOFY PLAYER/2.0"])
+        media.addOptions(["network-caching": vlcNetworkCache, "http-user-agent": "BLOFY PLAYER/2.9"])
         vlcPlayer.media = media; vlcPlayer.rate = rate; vlcPlayer.currentSubTitleFontScale = Float(subtitleScale); vlcPlayer.currentVideoSubTitleDelay = Int(subtitleDelayMs * 1000); vlcPlayer.play(); isPlaying = true
         if !isLive { let seek = keepPosition ? current : requestedStart; if seek > 0 { DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { [weak self] in self?.vlcPlayer.time = VLCTime(int: Int32(seek * 1000)) } } }
         vlcTimer?.invalidate(); vlcTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in Task { @MainActor in self?.pollVLC() } }; switching = false
@@ -459,10 +480,67 @@ final class PlayerBox: ObservableObject {
     }
 
     func seek(by delta: Double) { guard !isLive else { return }; seek(to: max(0, duration > 0 ? min(duration, current + delta) : current + delta)) }
+
     func seek(to seconds: Double) {
-        guard !isLive else { return }; let target = max(0, duration > 0 ? min(duration, seconds) : seconds); current = target
-        if engine == .apple { player.seek(to: CMTime(seconds: target, preferredTimescale: 600), toleranceBefore: CMTime(seconds: 0.25, preferredTimescale: 600), toleranceAfter: CMTime(seconds: 0.25, preferredTimescale: 600)) }
-        else { vlcPlayer.time = VLCTime(int: Int32(target * 1000)) }
+        guard !isLive, !switching else { return }
+        let target = max(0, duration > 0 ? min(duration, seconds) : seconds)
+        current = target
+        seekGeneration += 1
+        let generation = seekGeneration
+        statusText = "جاري الانتقال…"
+        lastAdvanceAt = Date()
+        lastPosition = -1
+
+        if engine == .apple {
+            let time = CMTime(seconds: target, preferredTimescale: 600)
+            player.seek(to: time, toleranceBefore: CMTime(seconds: 0.5, preferredTimescale: 600), toleranceAfter: CMTime(seconds: 0.5, preferredTimescale: 600)) { [weak self] finished in
+                Task { @MainActor in
+                    guard let self, generation == self.seekGeneration else { return }
+                    if finished {
+                        self.player.playImmediately(atRate: self.rate)
+                        self.isPlaying = true
+                        self.lastAdvanceAt = Date()
+                    }
+                }
+            }
+        } else {
+            vlcPlayer.time = VLCTime(int: Int32(target * 1000))
+            if !vlcPlayer.isPlaying { vlcPlayer.play(); vlcPlayer.rate = rate }
+            isPlaying = true
+        }
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) { [weak self] in
+            Task { @MainActor in self?.verifySeek(target: target, generation: generation) }
+        }
+    }
+
+    private func verifySeek(target: Double, generation: Int) {
+        guard !isLive, generation == seekGeneration, !switching else { return }
+        let tolerance = max(5.0, min(12.0, duration * 0.01))
+        let movedNearTarget = abs(current - target) <= tolerance
+        if movedNearTarget && isPlaying {
+            statusText = ""
+            return
+        }
+
+        statusText = "إعادة فتح الفيديو من الموضع…"
+        current = target
+        requestedStart = target
+        lastAdvanceAt = Date()
+        lastPosition = -1
+
+        if engine == .apple {
+            if candidates.indices.contains(candidateIndex) {
+                playApple(at: candidateIndex, keepPosition: true)
+            } else if preferredEngine != "apple" {
+                tryVLCFallback()
+            }
+        } else if let url = currentPlaybackURL {
+            vlcPlayer.stop()
+            playVLC(url: url, keepPosition: true)
+        } else {
+            tryVLCFallback()
+        }
     }
 
     func setRate(_ value: Float) { rate = value; if engine == .apple { if isPlaying { player.playImmediately(atRate: value) } } else { vlcPlayer.rate = value } }
@@ -547,7 +625,7 @@ final class PlayerBox: ObservableObject {
         watchdog?.invalidate(); watchdog = nil; vlcTimer?.invalidate(); vlcTimer = nil; statusObservation?.invalidate(); statusObservation = nil
         if let endObserver { NotificationCenter.default.removeObserver(endObserver) }; endObserver = nil
         if let token { player.removeTimeObserver(token) }; token = nil
-        player.pause(); player.replaceCurrentItem(with: nil); vlcPlayer.stop(); candidates = []; switching = false; isPlaying = false
+        player.pause(); player.replaceCurrentItem(with: nil); vlcPlayer.stop(); candidates = []; currentPlaybackURL = nil; switching = false; isPlaying = false
     }
 }
 
