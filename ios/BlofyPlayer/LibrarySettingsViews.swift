@@ -193,6 +193,12 @@ struct SettingsView: View {
     @EnvironmentObject var model: AppModel
     @Binding var showAdd: Bool
 
+    private var versionLabel: String {
+        let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "—"
+        let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "—"
+        return "\(version) (\(build))"
+    }
+
     var body: some View {
         NavigationStack {
             ScrollView {
@@ -293,7 +299,7 @@ struct SettingsView: View {
                     }
 
                     SettingsCard(title: "حول BLOFY", icon: "info.circle.fill") {
-                        SettingValueRow(title: "النسخة", value: "2.8 iOS Premium")
+                        SettingValueRow(title: "النسخة", value: versionLabel)
                         Text("محرك هجين Apple + VLC، بث سريع، EPG، مفضلة، متابعة مشاهدة، صوت وترجمة وتحكم متقدم.")
                             .font(.caption).foregroundStyle(BlofyTheme.textMuted).frame(maxWidth: .infinity, alignment: .leading)
                     }
@@ -391,6 +397,8 @@ struct AddPlaylistView: View {
                         .foregroundStyle(BlofyTheme.purpleBright).fontWeight(.bold)
                 }
             }
-        }.preferredColorScheme(.dark)
+        }
+        .preferredColorScheme(.dark)
+        .onAppear { model.error = "" }
     }
 }
