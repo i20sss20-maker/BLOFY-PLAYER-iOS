@@ -9,28 +9,59 @@ actor ProviderClient {
         config.timeoutIntervalForResource = 180
         config.requestCachePolicy = .reloadIgnoringLocalCacheData
         config.httpMaximumConnectionsPerHost = 6
+        config.waitsForConnectivity = true
         return URLSession(configuration: config)
     }()
 
     private func requestData(_ url: URL) async throws -> Data {
         var request = URLRequest(url: url)
-        request.setValue("BLOFY PLAYER/2.0", forHTTPHeaderField: "User-Agent")
+        request.setValue("BLOFY PLAYER/2.9", forHTTPHeaderField: "User-Agent")
         request.setValue("application/json,text/plain,*/*", forHTTPHeaderField: "Accept")
         request.setValue("gzip, deflate", forHTTPHeaderField: "Accept-Encoding")
-        do {
-            let (data, response) = try await session.data(for: request)
-            guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) else {
-                throw AppError.message("السيرفر رفض الطلب")
+
+        var lastNetworkError: URLError?
+        for attempt in 0..<3 {
+            do {
+                let (data, response) = try await session.data(for: request)
+                guard let http = response as? HTTPURLResponse else {
+                    throw AppError.message("استجابة السيرفر غير صحيحة")
+                }
+                if (200...299).contains(http.statusCode) { return data }
+                if http.statusCode == 401 || http.statusCode == 403 {
+                    throw AppError.message("السيرفر رفض بيانات الدخول")
+                }
+                if http.statusCode == 429 || (500...599).contains(http.statusCode) {
+                    if attempt < 2 {
+                        let delay = UInt64((0.7 + Double(attempt) * 0.8) * 1_000_000_000)
+                        try? await Task.sleep(nanoseconds: delay)
+                        continue
+                    }
+                    throw AppError.message("السيرفر مشغول مؤقتًا · حاول مرة أخرى")
+                }
+                throw AppError.message("السيرفر رفض الطلب (\(http.statusCode))")
+            } catch let error as AppError {
+                throw error
+            } catch let error as URLError {
+                lastNetworkError = error
+                let retryable: Set<URLError.Code> = [.timedOut, .networkConnectionLost, .cannotConnectToHost, .cannotFindHost, .dnsLookupFailed, .resourceUnavailable]
+                if attempt < 2 && retryable.contains(error.code) {
+                    let delay = UInt64((0.6 + Double(attempt) * 0.9) * 1_000_000_000)
+                    try? await Task.sleep(nanoseconds: delay)
+                    continue
+                }
+                break
+            } catch {
+                break
             }
-            return data
-        } catch let error as AppError {
-            throw error
-        } catch {
-            if let urlError = error as? URLError, urlError.code == .timedOut {
-                throw AppError.message("انتهت مهلة اتصال السيرفر · حاول مرة أخرى")
-            }
-            throw AppError.message("تعذر الاتصال بالسيرفر")
         }
+
+        if lastNetworkError?.code == .timedOut {
+            throw AppError.message("انتهت مهلة اتصال السيرفر · حاول مرة أخرى")
+        }
+        if lastNetworkError?.code == .notConnectedToInternet {
+            throw AppError.message("لا يوجد اتصال بالإنترنت")
+        }
+        throw AppError.message("تعذر الاتصال بالسيرفر")
     }
 
     private func apiURL(_ provider: Playlist, action: String? = nil, extra: [String: String] = [:]) throws -> URL {
@@ -59,14 +90,14 @@ actor ProviderClient {
         let categoryURL = try apiURL(provider, action: categoryAction)
         let itemURL = try apiURL(provider, action: itemAction)
 
-        async let categoryDataTask = requestData(categoryURL)
+        async let categoryDataTask: Data? = try? requestData(categoryURL)
         async let itemDataTask = requestData(itemURL)
         let (categoryData, itemData) = try await (categoryDataTask, itemDataTask)
 
         var parsedCategories: [MediaCategory] = []
         var parsedItems: [MediaItem] = []
 
-        if let rows = try JSONSerialization.jsonObject(with: categoryData) as? [[String: Any]] {
+        if let categoryData, let rows = try? JSONSerialization.jsonObject(with: categoryData) as? [[String: Any]] {
             parsedCategories.reserveCapacity(rows.count)
             for row in rows {
                 let key = string(row["category_id"])
@@ -100,7 +131,7 @@ actor ProviderClient {
         let known = Set(parsedCategories.map { $0.key })
         var missing = Set<String>()
         for item in parsedItems where !known.contains(item.categoryID) { missing.insert(item.categoryID) }
-        for key in missing { parsedCategories.append(MediaCategory(key: key, name: "بدون تصنيف", kind: kind)) }
+        for key in missing { parsedCategories.append(MediaCategory(key: key, name: key == "uncategorized" ? "بدون تصنيف" : "فئة \(key)", kind: kind)) }
         return KindBatch(kind: kind, categories: parsedCategories, items: parsedItems)
     }
 
