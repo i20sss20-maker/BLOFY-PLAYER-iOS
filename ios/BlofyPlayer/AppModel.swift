@@ -49,7 +49,11 @@ final class AppModel: ObservableObject {
         let defaults = UserDefaults.standard
         if let data = defaults.data(forKey: "playlists"), let value = try? JSONDecoder().decode([Playlist].self, from: data) {
             playlists = value
-            selected = value.first
+            if let savedID = defaults.string(forKey: "selectedPlaylistID"), let uuid = UUID(uuidString: savedID), let saved = value.first(where: { $0.id == uuid }) {
+                selected = saved
+            } else {
+                selected = value.first
+            }
         }
         if let data = defaults.data(forKey: "favorites"), let value = try? JSONDecoder().decode(Set<String>.self, from: data) { favorites = value }
         if let data = defaults.data(forKey: "resume"), let value = try? JSONDecoder().decode([String: ResumeEntry].self, from: data) { resume = value }
@@ -73,7 +77,7 @@ final class AppModel: ObservableObject {
         }
         let alphabet = Array("ABCDEFGHJKLMNPQRSTUVWXYZ23456789")
         var rng = SystemRandomNumberGenerator()
-        let raw = String((0..<8).map { _ in alphabet.randomElement(using: &rng)! })
+        let raw = String((0..<8).compactMap { _ in alphabet.randomElement(using: &rng) })
         deviceID = "BLOFY-\(raw.prefix(4))-\(raw.suffix(4))"
         activationCode = String(Int.random(in: 100000...999999, using: &rng))
         defaults.set(deviceID, forKey: "deviceID")
@@ -94,6 +98,8 @@ final class AppModel: ObservableObject {
 
     func savePlaylists() {
         if let data = try? JSONEncoder().encode(playlists) { UserDefaults.standard.set(data, forKey: "playlists") }
+        if let selected { UserDefaults.standard.set(selected.id.uuidString, forKey: "selectedPlaylistID") }
+        else { UserDefaults.standard.removeObject(forKey: "selectedPlaylistID") }
     }
 
     private func saveLibrary() {
@@ -118,6 +124,7 @@ final class AppModel: ObservableObject {
     }
 
     func delete(_ playlist: Playlist) {
+        UserDefaults.standard.removeObject(forKey: checkpointKey(for: playlist))
         playlists.removeAll { $0.id == playlist.id }
         if selected?.id == playlist.id {
             selected = playlists.first
@@ -130,6 +137,7 @@ final class AppModel: ObservableObject {
     func choose(_ playlist: Playlist) {
         guard selected?.id != playlist.id else { return }
         selected = playlist
+        savePlaylists()
         clearCatalog()
         restoreCheckpointIfPossible()
     }
@@ -139,22 +147,27 @@ final class AppModel: ObservableObject {
     }
 
     private func sourceKey(_ playlist: Playlist) -> String { "\(playlist.type)|\(playlist.url)|\(playlist.username)" }
+    private func checkpointKey(for playlist: Playlist) -> String { "catalogCheckpoint.\(playlist.id.uuidString)" }
     private func expectedStages(for provider: Playlist) -> Set<String> { provider.type == "m3u" ? ["m3u"] : [ContentKind.live.rawValue, ContentKind.movie.rawValue, ContentKind.series.rawValue] }
 
     private func persistCheckpoint(completed: Bool = false) {
         guard let provider = selected else { return }
         let checkpoint = CatalogCheckpoint(source: sourceKey(provider), categories: categories, items: items, completedStages: Array(completedStages), progress: progress, status: status, completed: completed, updatedAt: Date())
-        if let data = try? JSONEncoder().encode(checkpoint) { UserDefaults.standard.set(data, forKey: "catalogCheckpoint") }
+        if let data = try? JSONEncoder().encode(checkpoint) { UserDefaults.standard.set(data, forKey: checkpointKey(for: provider)) }
     }
 
     private func restoreCheckpointIfPossible() {
-        guard let provider = selected, let data = UserDefaults.standard.data(forKey: "catalogCheckpoint"), let checkpoint = try? JSONDecoder().decode(CatalogCheckpoint.self, from: data), checkpoint.source == sourceKey(provider) else { return }
+        guard let provider = selected else { return }
+        let defaults = UserDefaults.standard
+        let data = defaults.data(forKey: checkpointKey(for: provider)) ?? defaults.data(forKey: "catalogCheckpoint")
+        guard let data, let checkpoint = try? JSONDecoder().decode(CatalogCheckpoint.self, from: data), checkpoint.source == sourceKey(provider) else { return }
         categories = checkpoint.categories; items = checkpoint.items; completedStages = Set(checkpoint.completedStages); progress = checkpoint.progress; status = checkpoint.status
         if checkpoint.completed || completedStages.isSuperset(of: expectedStages(for: provider)) {
             loadedSource = checkpoint.source; progress = 1; status = "القوائم جاهزة"
         } else if !items.isEmpty || !completedStages.isEmpty {
             interruptedSync = true; status = "تم استعادة التقدم المحفوظ"
         }
+        if defaults.data(forKey: checkpointKey(for: provider)) == nil { persistCheckpoint(completed: checkpoint.completed) }
     }
 
     func toggleFavorite(_ item: MediaItem) {
@@ -164,8 +177,13 @@ final class AppModel: ObservableObject {
 
     func updateResume(item: MediaItem, seconds: Double, duration: Double) {
         guard item.kind == .movie || item.kind == .episode else { return }
+        guard seconds.isFinite, duration.isFinite else { return }
         if duration > 0 && seconds / duration > 0.93 { resume.removeValue(forKey: item.id) }
-        else if seconds >= 10 { resume[item.id] = ResumeEntry(seconds: seconds, duration: duration, item: item) }
+        else if seconds >= 10 { resume[item.id] = ResumeEntry(seconds: max(0, seconds), duration: max(0, duration), item: item) }
+        if resume.count > 250 {
+            let keep = resume.values.sorted { $0.updatedAt > $1.updatedAt }.prefix(200)
+            resume = Dictionary(uniqueKeysWithValues: keep.map { ($0.item.id, $0) })
+        }
         saveLibrary()
     }
 
@@ -175,7 +193,10 @@ final class AppModel: ObservableObject {
         let source = sourceKey(provider); let expected = expectedStages(for: provider)
         if !force && loadedSource == source && !items.isEmpty { return }
         if !force && completedStages.isSuperset(of: expected) && !items.isEmpty { loadedSource = source; progress = 1; status = "القوائم جاهزة"; persistCheckpoint(completed: true); return }
-        if force { categories.removeAll(); items.removeAll(); completedStages.removeAll(); loadedSource = ""; progress = 0; status = ""; UserDefaults.standard.removeObject(forKey: "catalogCheckpoint") }
+        if force {
+            categories.removeAll(); items.removeAll(); completedStages.removeAll(); loadedSource = ""; progress = 0; status = ""
+            UserDefaults.standard.removeObject(forKey: checkpointKey(for: provider))
+        }
         loading = true; interruptedSync = false; error = ""; if progress <= 0 { progress = 0.01 }; status = completedStages.isEmpty ? "الاتصال بالسيرفر" : "متابعة التحميل من آخر مرحلة"
         let token = UUID(); syncGeneration = token
         do {
@@ -198,8 +219,9 @@ final class AppModel: ObservableObject {
     }
 
     func resumeSyncIfNeeded() async {
-        guard selected != nil else { return }
-        if interruptedSync || (!completedStages.isSuperset(of: expectedStages(for: selected!)) && !items.isEmpty) { await loadCatalog() }
+        guard let provider = selected else { return }
+        let incomplete = !completedStages.isSuperset(of: expectedStages(for: provider))
+        if interruptedSync || (incomplete && (!items.isEmpty || !completedStages.isEmpty)) { await loadCatalog() }
     }
 
     func episodes(for series: MediaItem) async throws -> [MediaItem] { guard let provider = selected else { return [] }; return try await ProviderClient.shared.loadEpisodes(series: series, provider: provider) }
