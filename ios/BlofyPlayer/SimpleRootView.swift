@@ -36,10 +36,7 @@ struct SimpleRootView: View {
                         .tag(4)
                 }
                 .tint(BlofyTheme.purpleBright)
-                .task { await model.loadCatalog() }
             }
-
-            if model.loading { SyncProgressView().transition(.opacity).zIndex(20) }
         }
         .sheet(isPresented: $showAdd) { AddPlaylistView() }
         .preferredColorScheme(.dark)
@@ -119,34 +116,21 @@ private struct SimpleHomeView: View {
                         Button { tab = 4 } label: {
                             SimpleUtilityButton(title: "المزيد", icon: "ellipsis")
                         }
+                        .buttonStyle(.plain)
                     }
-                    .buttonStyle(.plain)
                     .padding(.horizontal, 16)
 
                     if !continueItems.isEmpty {
-                        SectionRow(title: "متابعة المشاهدة", subtitle: "كمل من حيث وقفت", items: continueItems)
+                        SimpleSection(title: "متابعة المشاهدة", items: continueItems)
                     }
                     if !movies.isEmpty {
-                        SectionRow(title: "أفلام", subtitle: "وصول سريع لمكتبتك", items: movies)
+                        SimpleSection(title: "أفلام", items: movies)
                     }
                     if !series.isEmpty {
-                        SectionRow(title: "مسلسلات", subtitle: "مواسم وحلقات", items: series)
-                    }
-
-                    if !model.error.isEmpty {
-                        HStack(spacing: 10) {
-                            Image(systemName: "exclamationmark.triangle.fill")
-                            Text(model.error).font(.caption).lineLimit(2)
-                            Spacer()
-                            Button("إعادة") { Task { await model.loadCatalog() } }
-                        }
-                        .foregroundStyle(BlofyTheme.error)
-                        .padding(14)
-                        .blofyPanel(radius: 16)
-                        .padding(.horizontal, 16)
+                        SimpleSection(title: "مسلسلات", items: series)
                     }
                 }
-                .padding(.bottom, 30)
+                .padding(.vertical, 12)
             }
             .background(BlofyTheme.backgroundGradient)
             .toolbar(.hidden, for: .navigationBar)
@@ -158,53 +142,43 @@ private struct SimpleHomeView: View {
 private struct SimpleHeroCard: View {
     @EnvironmentObject var model: AppModel
     @Binding var tab: Int
-    @StateObject private var preview = SimpleHomePreviewBox()
     @State private var play: PlaybackSession?
 
     private var featured: MediaItem? {
-        model.items.first(where: { $0.kind == .live && !$0.poster.isEmpty }) ?? model.items.first(where: { $0.kind == .live })
+        model.items.first(where: { $0.kind == .live }) ?? model.items.first(where: { $0.kind == .movie })
     }
 
     var body: some View {
         ZStack(alignment: .bottomLeading) {
-            Group {
-                if let item = featured {
-                    ZStack {
-                        SimpleVLCPreviewSurface(player: preview.player)
-                        if !preview.ready { Poster(url: item.poster).opacity(0.88) }
-                    }
-                } else {
-                    BlofyTheme.heroGradient
-                }
+            if let featured, featured.kind == .live {
+                HomeLivePreview(item: featured)
+            } else if let featured {
+                Poster(url: featured.poster)
+            } else {
+                LinearGradient(colors: [BlofyTheme.purpleDeep, BlofyTheme.surfaceRaised], startPoint: .topLeading, endPoint: .bottomTrailing)
             }
-            .frame(maxWidth: .infinity)
-            .frame(height: 232)
-            .clipped()
 
-            LinearGradient(colors: [.clear, .black.opacity(0.28), .black.opacity(0.9)], startPoint: .top, endPoint: .bottom)
+            LinearGradient(colors: [.clear, .black.opacity(0.18), BlofyTheme.background.opacity(0.96)], startPoint: .top, endPoint: .bottom)
 
             VStack(alignment: .leading, spacing: 8) {
-                HStack(spacing: 7) {
-                    Circle().fill(BlofyTheme.mint).frame(width: 7, height: 7)
-                    Text(preview.ready ? "معاينة مباشرة" : "BLOFY PLAYER")
-                        .font(.caption.bold())
-                        .foregroundStyle(preview.ready ? BlofyTheme.mint : BlofyTheme.purpleSoft)
-                }
-                Text(featured?.name ?? "جاهز للمشاهدة")
+                Text(featured?.kind == .live ? "معاينة مباشرة" : "BLOFY PLAYER")
+                    .font(.caption.bold())
+                    .foregroundStyle(BlofyTheme.mint)
+                Text(featured?.name ?? model.selected?.name ?? "جاهز للمشاهدة")
                     .font(.system(size: 25, weight: .black))
-                    .foregroundStyle(.white)
+                    .foregroundStyle(BlofyTheme.textPrimary)
                     .lineLimit(2)
-                Text(model.selected?.name ?? "")
-                    .font(.caption)
-                    .foregroundStyle(.white.opacity(0.72))
-                    .lineLimit(1)
-                HStack(spacing: 9) {
+
+                HStack(spacing: 10) {
                     if let featured {
                         Button {
-                            RecentLiveStore.record(featured)
-                            if let session = try? model.makePlaybackSession(for: featured) { play = session }
+                            if featured.kind == .live {
+                                tab = 1
+                            } else if let session = try? model.makePlaybackSession(for: featured) {
+                                play = session
+                            }
                         } label: {
-                            Label("شاهد الآن", systemImage: "play.fill")
+                            Label(featured.kind == .live ? "فتح البث" : "شاهد الآن", systemImage: "play.fill")
                                 .font(.subheadline.bold())
                                 .padding(.horizontal, 15)
                                 .padding(.vertical, 10)
@@ -213,74 +187,16 @@ private struct SimpleHeroCard: View {
                         }
                         .buttonStyle(.plain)
                     }
-                    Button { tab = 1 } label: {
-                        Label("كل القنوات", systemImage: "tv")
-                            .font(.subheadline.bold())
-                            .padding(.horizontal, 13)
-                            .padding(.vertical, 10)
-                            .background(.black.opacity(0.45), in: Capsule())
-                            .foregroundStyle(.white)
-                    }
-                    .buttonStyle(.plain)
                 }
             }
             .padding(18)
         }
-        .frame(height: 232)
+        .frame(height: 238)
         .clipShape(RoundedRectangle(cornerRadius: 26, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 26).stroke(BlofyTheme.purpleSoft.opacity(0.22)))
-        .shadow(color: BlofyTheme.purple.opacity(0.15), radius: 18, y: 8)
+        .overlay(RoundedRectangle(cornerRadius: 26).stroke(BlofyTheme.purpleSoft.opacity(0.24)))
+        .shadow(color: BlofyTheme.purple.opacity(0.15), radius: 20, y: 10)
         .padding(.horizontal, 16)
-        .task(id: featured?.id) {
-            preview.stop()
-            guard let featured,
-                  let session = try? model.makePlaybackSession(for: featured),
-                  let url = session.candidates.first else { return }
-            preview.start(url: url)
-        }
-        .onDisappear { preview.stop() }
         .fullScreenCover(item: $play) { PlayerScreen(session: $0) }
-    }
-}
-
-private struct SimpleVLCPreviewSurface: UIViewRepresentable {
-    let player: VLCMediaPlayer
-    func makeUIView(context: Context) -> UIView {
-        let view = UIView()
-        view.backgroundColor = .black
-        player.drawable = view
-        return view
-    }
-    func updateUIView(_ uiView: UIView, context: Context) {
-        if (player.drawable as AnyObject?) !== uiView { player.drawable = uiView }
-    }
-}
-
-@MainActor
-private final class SimpleHomePreviewBox: ObservableObject {
-    let player = VLCMediaPlayer()
-    @Published var ready = false
-    private var timer: Timer?
-
-    func start(url: URL) {
-        stop()
-        guard let media = VLCMedia(url: url) else { return }
-        media.addOptions(["network-caching": 650, "no-audio": 1, "http-user-agent": "BLOFY PLAYER/2.0"])
-        player.media = media
-        player.play()
-        timer = Timer.scheduledTimer(withTimeInterval: 0.65, repeats: true) { [weak self] _ in
-            Task { @MainActor in
-                guard let self else { return }
-                if self.player.isPlaying { self.ready = true }
-            }
-        }
-    }
-
-    func stop() {
-        timer?.invalidate()
-        timer = nil
-        player.stop()
-        ready = false
     }
 }
 
@@ -289,13 +205,12 @@ private struct SimpleStat: View {
     let title: String
     var body: some View {
         VStack(spacing: 2) {
-            Text("\(value)").font(.headline.bold()).foregroundStyle(BlofyTheme.textPrimary).monospacedDigit()
+            Text("\(value)").font(.headline.bold()).monospacedDigit().foregroundStyle(BlofyTheme.textPrimary)
             Text(title).font(.caption2).foregroundStyle(BlofyTheme.textMuted)
         }
         .frame(maxWidth: .infinity)
         .padding(.vertical, 10)
-        .background(BlofyTheme.surfaceRaised.opacity(0.9), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 14).stroke(BlofyTheme.divider))
+        .blofyPanel(radius: 14)
     }
 }
 
@@ -307,19 +222,14 @@ private struct SimpleLaunchButton: View {
 
     var body: some View {
         Button(action: action) {
-            VStack(spacing: 10) {
-                Image(systemName: icon)
-                    .font(.system(size: 24, weight: .bold))
-                    .foregroundStyle(BlofyTheme.purpleBright)
-                Text(title)
-                    .font(.headline.bold())
-                    .foregroundStyle(BlofyTheme.textPrimary)
-                Text(subtitle)
-                    .font(.caption2)
-                    .foregroundStyle(BlofyTheme.textMuted)
+            VStack(spacing: 8) {
+                Image(systemName: icon).font(.title2).foregroundStyle(BlofyTheme.purpleBright)
+                Text(title).font(.subheadline.bold()).foregroundStyle(BlofyTheme.textPrimary)
+                Text(subtitle).font(.caption2).foregroundStyle(BlofyTheme.textMuted)
             }
-            .frame(maxWidth: .infinity, minHeight: 118)
-            .blofyPanel(radius: 20)
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 15)
+            .blofyPanel(radius: 18)
         }
         .buttonStyle(.plain)
     }
@@ -328,14 +238,52 @@ private struct SimpleLaunchButton: View {
 private struct SimpleUtilityButton: View {
     let title: String
     let icon: String
-
     var body: some View {
-        Label(title, systemImage: icon)
-            .font(.subheadline.bold())
-            .foregroundStyle(BlofyTheme.textPrimary)
-            .frame(maxWidth: .infinity)
-            .padding(.vertical, 12)
-            .background(BlofyTheme.surfaceRaised, in: RoundedRectangle(cornerRadius: 15, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: 15).stroke(BlofyTheme.divider))
+        HStack(spacing: 7) {
+            Image(systemName: icon)
+            Text(title)
+        }
+        .font(.caption.bold())
+        .foregroundStyle(BlofyTheme.textSecondary)
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 10)
+        .background(BlofyTheme.surfaceRaised, in: RoundedRectangle(cornerRadius: 14))
+        .overlay(RoundedRectangle(cornerRadius: 14).stroke(BlofyTheme.divider))
+    }
+}
+
+private struct SimpleSection: View {
+    let title: String
+    let items: [MediaItem]
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text(title)
+                .font(.headline.bold())
+                .foregroundStyle(BlofyTheme.textPrimary)
+                .padding(.horizontal, 16)
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 11) {
+                    ForEach(items) { item in
+                        NavigationLink {
+                            if item.kind == .series { SeriesDetailsView(series: item) }
+                            else { DetailsView(item: item) }
+                        } label: {
+                            VStack(alignment: .leading, spacing: 6) {
+                                Poster(url: item.poster)
+                                    .frame(width: 132, height: 178)
+                                    .clipShape(RoundedRectangle(cornerRadius: 14))
+                                Text(item.name)
+                                    .font(.caption.bold())
+                                    .foregroundStyle(BlofyTheme.textPrimary)
+                                    .lineLimit(1)
+                                    .frame(width: 132, alignment: .leading)
+                            }
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .padding(.horizontal, 16)
+            }
+        }
     }
 }
