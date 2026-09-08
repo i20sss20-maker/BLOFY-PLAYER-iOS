@@ -12,10 +12,10 @@ struct ActivationView: View {
                 BlofyBrandMark()
 
                 VStack(spacing: 7) {
-                    Text("تفعيل BLOFY PLAYER")
+                    Text("الدخول إلى BLOFY PLAYER")
                         .font(.system(size: 28, weight: .black))
                         .foregroundStyle(BlofyTheme.textPrimary)
-                    Text("امسح الرمز أو استخدم رقم الجهاز والرمز في بوابة BLOFY")
+                    Text("استخدم رقم الجهاز ورمز الدخول، أو امسح الباركود من بوابة BLOFY")
                         .font(.subheadline)
                         .multilineTextAlignment(.center)
                         .foregroundStyle(BlofyTheme.textMuted)
@@ -33,7 +33,7 @@ struct ActivationView: View {
 
                 VStack(spacing: 14) {
                     ActivationValue(title: "رقم الجهاز", value: model.deviceID, prominent: false)
-                    ActivationValue(title: "رمز التفعيل", value: model.activationCode, prominent: true)
+                    ActivationValue(title: "رمز الدخول", value: model.activationCode, prominent: true)
                 }
                 .padding(18)
                 .blofyPanel(radius: 22)
@@ -46,8 +46,8 @@ struct ActivationView: View {
                 Button { Task { await check() } } label: {
                     HStack {
                         if checking { ProgressView().tint(.white) }
-                        else { Image(systemName: "arrow.clockwise") }
-                        Text(checking ? "جاري التحقق" : "تحقق من التفعيل")
+                        else { Image(systemName: "arrow.right.circle.fill") }
+                        Text(checking ? "جاري الدخول…" : "دخول")
                     }
                     .font(.headline).frame(maxWidth: .infinity).padding(.vertical, 14)
                     .background(BlofyTheme.primaryGradient, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
@@ -69,7 +69,6 @@ struct ActivationView: View {
             .padding(.horizontal, 24)
         }
         .background(BlofyTheme.backgroundGradient.ignoresSafeArea())
-        .task { if model.activationStatus.isEmpty { await check() } }
     }
 
     private var statusColor: Color {
@@ -82,19 +81,26 @@ struct ActivationView: View {
 
     private var statusText: String {
         switch model.activationStatus.lowercased() {
-        case "active": return "الجهاز مفعّل"
+        case "active": return "الجهاز مفعّل وجاهز للدخول"
         case "trial": return "الفترة التجريبية فعالة"
         case "expired": return "انتهت مدة التفعيل"
         case "blocked": return "الجهاز موقوف"
         case "offline": return "تعذر التحقق من الخدمة"
-        default: return "جاري التحقق من حالة الجهاز"
+        default: return "اضغط دخول للتحقق من الجهاز"
         }
     }
 
     private func check() async {
+        guard !checking else { return }
         checking = true
+        model.error = ""
         await model.refreshActivation()
-        if model.activationAllowsUse { await model.syncPortalPlaylists(); await model.loadCatalog() }
+        if model.activationAllowsUse {
+            await model.syncPortalPlaylists()
+            if model.selected != nil {
+                await model.loadCatalog()
+            }
+        }
         checking = false
     }
 
