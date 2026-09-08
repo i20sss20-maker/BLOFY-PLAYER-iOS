@@ -3,9 +3,10 @@ import SwiftUI
 struct AppRoot: View {
     @EnvironmentObject var model: AppModel
     @State private var bootstrapping = true
+    @State private var sessionEntered = false
 
     private var shouldShowProgress: Bool {
-        guard model.activationAllowsUse, model.selected != nil else { return false }
+        guard sessionEntered, model.activationAllowsUse, model.selected != nil else { return false }
         if model.loading { return true }
         if model.items.isEmpty && model.progress < 1 { return true }
         return model.progress > 0 && model.progress < 1
@@ -18,30 +19,35 @@ struct AppRoot: View {
             Group {
                 if bootstrapping {
                     EntrySplashView()
-                } else if !model.activationAllowsUse {
-                    ActivationView()
-                        .transition(.opacity)
+                } else if !sessionEntered || !model.activationAllowsUse {
+                    ActivationView {
+                        withAnimation(.easeInOut(duration: 0.28)) {
+                            sessionEntered = true
+                        }
+                    }
+                    .transition(.opacity.combined(with: .scale(scale: 0.985)))
                 } else if shouldShowProgress {
-                    SyncProgressView()
-                        .transition(.opacity)
+                    PremiumSyncProgressView()
+                        .transition(.opacity.combined(with: .scale(scale: 0.99)))
                 } else {
-                    SimpleRootView()
-                        .transition(.opacity)
+                    SimpleRootView {
+                        model.pauseSyncForBackground()
+                        withAnimation(.easeInOut(duration: 0.25)) {
+                            sessionEntered = false
+                        }
+                    }
+                    .transition(.opacity)
                 }
             }
-            .animation(.easeInOut(duration: 0.22), value: model.activationAllowsUse)
-            .animation(.easeInOut(duration: 0.22), value: shouldShowProgress)
+            .animation(.easeInOut(duration: 0.24), value: sessionEntered)
+            .animation(.easeInOut(duration: 0.24), value: model.activationAllowsUse)
+            .animation(.easeInOut(duration: 0.24), value: shouldShowProgress)
         }
         .tint(BlofyTheme.purpleBright)
         .preferredColorScheme(.dark)
         .task {
             await model.refreshActivation()
             bootstrapping = false
-            guard model.activationAllowsUse else { return }
-            await model.syncPortalPlaylists()
-            if model.selected != nil {
-                await model.loadCatalog()
-            }
         }
     }
 }
