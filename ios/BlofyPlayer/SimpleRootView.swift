@@ -37,6 +37,8 @@ struct SimpleRootView: View {
                         .tag(4)
                 }
                 .tint(BlofyTheme.purpleBright)
+                .toolbarBackground(BlofyTheme.backgroundRaised, for: .tabBar)
+                .toolbarBackground(.visible, for: .tabBar)
             }
         }
         .sheet(isPresented: $showAdd) { AddPlaylistView() }
@@ -144,18 +146,46 @@ private struct ServerHeader: View {
         HStack(spacing: 12) {
             BlofyBrandMark(compact: true)
 
-            VStack(alignment: .leading, spacing: 3) {
-                Text(model.selected?.name ?? "BLOFY Server")
-                    .font(.subheadline.bold())
-                    .foregroundStyle(BlofyTheme.textPrimary)
-                    .lineLimit(1)
-                HStack(spacing: 6) {
-                    Circle().fill(BlofyTheme.mint).frame(width: 6, height: 6)
-                    Text("متصل وجاهز")
+            Menu {
+                if model.playlists.count > 1 {
+                    ForEach(model.playlists) { playlist in
+                        Button {
+                            guard playlist.id != model.selected?.id else { return }
+                            model.choose(playlist)
+                            Task { await model.loadCatalog() }
+                        } label: {
+                            if playlist.id == model.selected?.id {
+                                Label(playlist.name, systemImage: "checkmark.circle.fill")
+                            } else {
+                                Label(playlist.name, systemImage: "server.rack")
+                            }
+                        }
+                    }
+                    Divider()
+                }
+                Button(role: .destructive) { showLogoutConfirm = true } label: {
+                    Label("تسجيل الخروج", systemImage: "rectangle.portrait.and.arrow.right")
+                }
+            } label: {
+                HStack(spacing: 8) {
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(model.selected?.name ?? "BLOFY Server")
+                            .font(.subheadline.bold())
+                            .foregroundStyle(BlofyTheme.textPrimary)
+                            .lineLimit(1)
+                        HStack(spacing: 6) {
+                            Circle().fill(BlofyTheme.mint).frame(width: 6, height: 6)
+                            Text(model.playlists.count > 1 ? "متصل · اضغط لتبديل السيرفر" : "متصل وجاهز")
+                                .font(.caption2.bold())
+                                .foregroundStyle(BlofyTheme.textMuted)
+                        }
+                    }
+                    Image(systemName: "chevron.down")
                         .font(.caption2.bold())
                         .foregroundStyle(BlofyTheme.textMuted)
                 }
             }
+            .buttonStyle(.plain)
 
             Spacer()
 
@@ -164,15 +194,10 @@ private struct ServerHeader: View {
             }
             .buttonStyle(.plain)
 
-            Menu {
-                Button { } label: { Label(model.selected?.name ?? "السيرفر", systemImage: "server.rack") }
-                Divider()
-                Button(role: .destructive) { showLogoutConfirm = true } label: {
-                    Label("تسجيل الخروج", systemImage: "rectangle.portrait.and.arrow.right")
-                }
-            } label: {
+            Button { showLogoutConfirm = true } label: {
                 HeaderCircle(icon: "person.crop.circle", tint: BlofyTheme.purpleSoft)
             }
+            .buttonStyle(.plain)
         }
         .padding(.horizontal, 16)
         .padding(.top, 4)
@@ -203,7 +228,10 @@ private struct SimpleHeroCard: View {
 
     var body: some View {
         ZStack(alignment: .bottomLeading) {
-            if let featured {
+            if let featured, featured.kind == .live {
+                SimpleLivePreview(item: featured)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else if let featured {
                 Poster(url: featured.poster)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .clipped()
@@ -220,7 +248,7 @@ private struct SimpleHeroCard: View {
             VStack(alignment: .leading, spacing: 10) {
                 HStack(spacing: 7) {
                     Circle().fill(BlofyTheme.mint).frame(width: 7, height: 7)
-                    Text(featured?.kind == .live ? "على الهواء الآن" : "مختار لك")
+                    Text(featured?.kind == .live ? "معاينة مباشرة" : "مختار لك")
                         .font(.caption.bold())
                         .foregroundStyle(BlofyTheme.mint)
                 }
@@ -238,21 +266,32 @@ private struct SimpleHeroCard: View {
                 }
 
                 if let featured {
-                    Button {
-                        if featured.kind == .live {
-                            tab = 1
-                        } else if let session = try? model.makePlaybackSession(for: featured) {
-                            play = session
+                    HStack(spacing: 10) {
+                        Button {
+                            if featured.kind == .live {
+                                tab = 1
+                            } else if let session = try? model.makePlaybackSession(for: featured) {
+                                play = session
+                            }
+                        } label: {
+                            Label(featured.kind == .live ? "فتح البث" : "شاهد الآن", systemImage: "play.fill")
+                                .font(.subheadline.bold())
+                                .padding(.horizontal, 16)
+                                .padding(.vertical, 11)
+                                .background(.white, in: Capsule())
+                                .foregroundStyle(.black)
                         }
-                    } label: {
-                        Label(featured.kind == .live ? "فتح البث" : "شاهد الآن", systemImage: "play.fill")
-                            .font(.subheadline.bold())
-                            .padding(.horizontal, 16)
-                            .padding(.vertical, 11)
-                            .background(.white, in: Capsule())
-                            .foregroundStyle(.black)
+                        .buttonStyle(.plain)
+
+                        if featured.kind == .live {
+                            Text("بدون صوت")
+                                .font(.caption2.bold())
+                                .foregroundStyle(.white.opacity(0.72))
+                                .padding(.horizontal, 10)
+                                .padding(.vertical, 8)
+                                .background(.black.opacity(0.36), in: Capsule())
+                        }
                     }
-                    .buttonStyle(.plain)
                 }
             }
             .padding(20)
@@ -263,6 +302,85 @@ private struct SimpleHeroCard: View {
         .shadow(color: .black.opacity(0.28), radius: 22, y: 14)
         .padding(.horizontal, 16)
         .fullScreenCover(item: $play) { PlayerScreen(session: $0) }
+    }
+}
+
+private struct SimpleLivePreview: View {
+    @EnvironmentObject var model: AppModel
+    let item: MediaItem
+    @StateObject private var box = SimplePreviewBox()
+
+    var body: some View {
+        ZStack {
+            SimplePreviewSurface(player: box.player)
+            if !box.ready {
+                Poster(url: item.poster)
+                    .opacity(0.88)
+            }
+            VStack {
+                HStack {
+                    Spacer()
+                    Label("LIVE", systemImage: "dot.radiowaves.left.and.right")
+                        .font(.caption2.bold())
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 9)
+                        .padding(.vertical, 6)
+                        .background(.red.opacity(0.84), in: Capsule())
+                        .padding(12)
+                }
+                Spacer()
+            }
+        }
+        .task(id: item.id) {
+            guard let session = try? model.makePlaybackSession(for: item), let url = session.candidates.first else { return }
+            box.start(url: url)
+        }
+        .onDisappear { box.stop() }
+    }
+}
+
+private struct SimplePreviewSurface: UIViewRepresentable {
+    let player: VLCMediaPlayer
+    func makeUIView(context: Context) -> UIView {
+        let view = UIView()
+        view.backgroundColor = .black
+        player.drawable = view
+        return view
+    }
+    func updateUIView(_ uiView: UIView, context: Context) {
+        if (player.drawable as AnyObject?) !== uiView { player.drawable = uiView }
+    }
+}
+
+@MainActor
+private final class SimplePreviewBox: ObservableObject {
+    let player = VLCMediaPlayer()
+    @Published var ready = false
+    private var timer: Timer?
+
+    func start(url: URL) {
+        stop()
+        guard let media = VLCMedia(url: url) else { return }
+        media.addOptions([
+            "network-caching": 650,
+            "no-audio": 1,
+            "http-user-agent": "BLOFY PLAYER/0.3"
+        ])
+        player.media = media
+        player.play()
+        timer = Timer.scheduledTimer(withTimeInterval: 0.65, repeats: true) { [weak self] _ in
+            Task { @MainActor in
+                guard let self else { return }
+                if self.player.isPlaying { self.ready = true }
+            }
+        }
+    }
+
+    func stop() {
+        timer?.invalidate()
+        timer = nil
+        player.stop()
+        ready = false
     }
 }
 
