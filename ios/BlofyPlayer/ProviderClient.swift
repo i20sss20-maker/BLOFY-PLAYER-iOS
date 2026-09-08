@@ -14,14 +14,23 @@ actor ProviderClient {
 
     private func requestData(_ url: URL) async throws -> Data {
         var request = URLRequest(url: url)
-        request.setValue("BLOFY-PLAYER-iOS/1.1", forHTTPHeaderField: "User-Agent")
+        request.setValue("BLOFY PLAYER/2.0", forHTTPHeaderField: "User-Agent")
         request.setValue("application/json,text/plain,*/*", forHTTPHeaderField: "Accept")
         request.setValue("gzip, deflate", forHTTPHeaderField: "Accept-Encoding")
-        let (data, response) = try await session.data(for: request)
-        guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) else {
-            throw AppError.message("السيرفر رفض الطلب")
+        do {
+            let (data, response) = try await session.data(for: request)
+            guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) else {
+                throw AppError.message("السيرفر رفض الطلب")
+            }
+            return data
+        } catch let error as AppError {
+            throw error
+        } catch {
+            if let urlError = error as? URLError, urlError.code == .timedOut {
+                throw AppError.message("انتهت مهلة اتصال السيرفر · حاول مرة أخرى")
+            }
+            throw AppError.message("تعذر الاتصال بالسيرفر")
         }
-        return data
     }
 
     private func apiURL(_ provider: Playlist, action: String? = nil, extra: [String: String] = [:]) throws -> URL {
@@ -90,12 +99,8 @@ actor ProviderClient {
 
         let known = Set(parsedCategories.map { $0.key })
         var missing = Set<String>()
-        for item in parsedItems where !known.contains(item.categoryID) {
-            missing.insert(item.categoryID)
-        }
-        for key in missing {
-            parsedCategories.append(MediaCategory(key: key, name: "بدون تصنيف", kind: kind))
-        }
+        for item in parsedItems where !known.contains(item.categoryID) { missing.insert(item.categoryID) }
+        for key in missing { parsedCategories.append(MediaCategory(key: key, name: "بدون تصنيف", kind: kind)) }
         return KindBatch(kind: kind, categories: parsedCategories, items: parsedItems)
     }
 
@@ -114,8 +119,7 @@ actor ProviderClient {
 
         await progress(0.03, "التحقق من الاشتراك")
         let authData = try await requestData(apiURL(provider))
-        guard let root = try JSONSerialization.jsonObject(with: authData) as? [String: Any],
-              let info = root["user_info"] as? [String: Any] else {
+        guard let root = try JSONSerialization.jsonObject(with: authData) as? [String: Any], let info = root["user_info"] as? [String: Any] else {
             throw AppError.message("استجابة Xtream غير صحيحة")
         }
         let auth = string(info["auth"])
@@ -146,28 +150,14 @@ actor ProviderClient {
 
         let needMovie = !completed.contains(ContentKind.movie.rawValue)
         let needSeries = !completed.contains(ContentKind.series.rawValue)
-
         if needMovie || needSeries {
             await progress(0.36, needMovie && needSeries ? "تحميل الأفلام والمسلسلات معًا" : (needMovie ? "تحميل الأفلام" : "تحميل المسلسلات"))
-
             try await withThrowingTaskGroup(of: KindBatch.self) { group in
-                if needMovie {
-                    group.addTask { [self] in
-                        try await self.loadKind(provider, kind: .movie, categoryAction: "get_vod_categories", itemAction: "get_vod_streams")
-                    }
-                }
-                if needSeries {
-                    group.addTask { [self] in
-                        try await self.loadKind(provider, kind: .series, categoryAction: "get_series_categories", itemAction: "get_series")
-                    }
-                }
-
+                if needMovie { group.addTask { [self] in try await self.loadKind(provider, kind: .movie, categoryAction: "get_vod_categories", itemAction: "get_vod_streams") } }
+                if needSeries { group.addTask { [self] in try await self.loadKind(provider, kind: .series, categoryAction: "get_series_categories", itemAction: "get_series") } }
                 for try await batch in group {
-                    if batch.kind == .movie {
-                        await apply(batch, value: needSeries ? 0.66 : 0.90, message: "اكتملت الأفلام")
-                    } else if batch.kind == .series {
-                        await apply(batch, value: needMovie ? 0.90 : 0.90, message: "اكتملت المسلسلات")
-                    }
+                    if batch.kind == .movie { await apply(batch, value: needSeries ? 0.66 : 0.90, message: "اكتملت الأفلام") }
+                    else if batch.kind == .series { await apply(batch, value: 0.90, message: "اكتملت المسلسلات") }
                 }
             }
         }
@@ -187,9 +177,7 @@ actor ProviderClient {
         var output: [MediaItem] = []
         if let dictionary = raw as? [String: Any] {
             let keys = dictionary.keys.sorted { (Int($0) ?? 0) < (Int($1) ?? 0) }
-            for key in keys {
-                if let rows = dictionary[key] as? [[String: Any]] { appendEpisodes(rows, seasonKey: key, series: series, output: &output) }
-            }
+            for key in keys { if let rows = dictionary[key] as? [[String: Any]] { appendEpisodes(rows, seasonKey: key, series: series, output: &output) } }
         } else if let rows = raw as? [[String: Any]] {
             appendEpisodes(rows, seasonKey: "1", series: series, output: &output)
         }
@@ -208,7 +196,8 @@ actor ProviderClient {
                 name: first(string(row["title"]), "\(series.name) · S\(season) E\(episode)"),
                 categoryID: series.categoryID, poster: first(string(info["movie_image"]), series.poster),
                 container: first(string(row["container_extension"]), string(info["container_extension"]), "mp4"),
-                directURL: string(row["direct_source"]), plot: string(info["plot"]), seriesID: series.id,
+                directURL: first(string(row["direct_source"]), string(info["direct_source"])),
+                plot: first(string(info["plot"]), string(row["plot"])), seriesID: series.id,
                 season: season, episode: episode
             ))
         }
@@ -224,7 +213,8 @@ actor ProviderClient {
         result.plot = first(string(info["plot"]), string(info["description"]), movie.plot)
         result.poster = first(string(info["movie_image"]), movie.poster)
         result.rating = first(string(info["rating"]), movie.rating)
-        result.container = first(string(movieData["container_extension"]), movie.container)
+        result.container = first(string(movieData["container_extension"]), string(info["container_extension"]), movie.container)
+        result.directURL = first(string(movieData["direct_source"]), string(info["direct_source"]), movie.directURL)
         return result
     }
 
@@ -237,9 +227,7 @@ actor ProviderClient {
         await progress(0.08, "الاتصال بقائمة M3U")
         let data = try await requestData(url)
         await progress(0.42, "تم تنزيل M3U · جاري القراءة")
-        guard let text = String(data: data, encoding: .utf8) ?? String(data: data, encoding: .isoLatin1) else {
-            throw AppError.message("ترميز M3U غير مدعوم")
-        }
+        guard let text = String(data: data, encoding: .utf8) ?? String(data: data, encoding: .isoLatin1) else { throw AppError.message("ترميز M3U غير مدعوم") }
         var categories: [MediaCategory] = []
         var items: [MediaItem] = []
         var name = ""
