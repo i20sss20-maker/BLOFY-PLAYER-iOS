@@ -1,13 +1,28 @@
 import Foundation
 
 extension AppModel {
+    private var activationCacheStatusKey: String { "activation.lastValidStatus" }
+    private var activationCacheDateKey: String { "activation.lastValidatedAt" }
+    private var activationGraceInterval: TimeInterval { 24 * 60 * 60 }
+
     func refreshActivation() async {
         do {
             let result = try await PortalClient.shared.checkActivation(deviceID: deviceID, code: activationCode)
+            let normalized = result.status.lowercased()
             activationStatus = result.status
+            if ["trial", "active"].contains(normalized) {
+                UserDefaults.standard.set(result.status, forKey: activationCacheStatusKey)
+                UserDefaults.standard.set(Date(), forKey: activationCacheDateKey)
+                if error.contains("التفعيل") || error.contains("الاتصال") { error = "" }
+            } else {
+                UserDefaults.standard.removeObject(forKey: activationCacheStatusKey)
+                UserDefaults.standard.removeObject(forKey: activationCacheDateKey)
+            }
         } catch {
             activationStatus = "offline"
-            self.error = error.localizedDescription
+            if !activationAllowsUse {
+                self.error = "تعذر التحقق من التفعيل · تحقق من الاتصال وحاول مرة أخرى"
+            }
         }
     }
 
@@ -35,11 +50,20 @@ extension AppModel {
             if selected == nil { selected = merged.first }
             savePlaylists()
         } catch {
-            self.error = error.localizedDescription
+            // Keep local playlists usable when the portal has a temporary outage.
+            if playlists.isEmpty { self.error = error.localizedDescription }
         }
     }
 
     var activationAllowsUse: Bool {
-        ["trial", "active"].contains(activationStatus.lowercased())
+        let normalized = activationStatus.lowercased()
+        if ["trial", "active"].contains(normalized) { return true }
+        guard normalized == "offline" || normalized.isEmpty else { return false }
+
+        let defaults = UserDefaults.standard
+        guard let cached = defaults.string(forKey: activationCacheStatusKey)?.lowercased(),
+              ["trial", "active"].contains(cached),
+              let validatedAt = defaults.object(forKey: activationCacheDateKey) as? Date else { return false }
+        return Date().timeIntervalSince(validatedAt) <= activationGraceInterval
     }
 }
