@@ -73,7 +73,7 @@ private struct SimpleHomeView: View {
         NavigationStack {
             ScrollView(showsIndicators: false) {
                 VStack(alignment: .leading, spacing: 24) {
-                    ServerHeader(showLogoutConfirm: $showLogoutConfirm)
+                    ServerHeader(showLogoutConfirm: $showLogoutConfirm, showAdd: $showAdd)
 
                     SimpleHeroCard(tab: $tab)
 
@@ -141,13 +141,14 @@ private struct SimpleHomeView: View {
 private struct ServerHeader: View {
     @EnvironmentObject var model: AppModel
     @Binding var showLogoutConfirm: Bool
+    @Binding var showAdd: Bool
 
     var body: some View {
         HStack(spacing: 12) {
             BlofyBrandMark(compact: true)
 
             Menu {
-                if model.playlists.count > 1 {
+                Section("السيرفرات") {
                     ForEach(model.playlists) { playlist in
                         Button {
                             guard playlist.id != model.selected?.id else { return }
@@ -161,8 +162,22 @@ private struct ServerHeader: View {
                             }
                         }
                     }
-                    Divider()
                 }
+
+                Divider()
+
+                Button {
+                    Task { await model.loadCatalog(force: true) }
+                } label: {
+                    Label("تحديث السيرفر", systemImage: "arrow.clockwise")
+                }
+
+                Button { showAdd = true } label: {
+                    Label("إضافة سيرفر", systemImage: "plus.rectangle.on.folder.fill")
+                }
+
+                Divider()
+
                 Button(role: .destructive) { showLogoutConfirm = true } label: {
                     Label("تسجيل الخروج", systemImage: "rectangle.portrait.and.arrow.right")
                 }
@@ -175,7 +190,7 @@ private struct ServerHeader: View {
                             .lineLimit(1)
                         HStack(spacing: 6) {
                             Circle().fill(BlofyTheme.mint).frame(width: 6, height: 6)
-                            Text(model.playlists.count > 1 ? "متصل · اضغط لتبديل السيرفر" : "متصل وجاهز")
+                            Text(model.playlists.count > 1 ? "متصل · اضغط لإدارة السيرفر" : "متصل وجاهز")
                                 .font(.caption2.bold())
                                 .foregroundStyle(BlofyTheme.textMuted)
                         }
@@ -194,10 +209,20 @@ private struct ServerHeader: View {
             }
             .buttonStyle(.plain)
 
-            Button { showLogoutConfirm = true } label: {
+            Menu {
+                Button { Task { await model.loadCatalog(force: true) } } label: {
+                    Label("تحديث المحتوى", systemImage: "arrow.clockwise")
+                }
+                Button { showAdd = true } label: {
+                    Label("إضافة قائمة", systemImage: "plus")
+                }
+                Divider()
+                Button(role: .destructive) { showLogoutConfirm = true } label: {
+                    Label("تسجيل الخروج", systemImage: "rectangle.portrait.and.arrow.right")
+                }
+            } label: {
                 HeaderCircle(icon: "person.crop.circle", tint: BlofyTheme.purpleSoft)
             }
-            .buttonStyle(.plain)
         }
         .padding(.horizontal, 16)
         .padding(.top, 4)
@@ -284,7 +309,7 @@ private struct SimpleHeroCard: View {
                         .buttonStyle(.plain)
 
                         if featured.kind == .live {
-                            Text("بدون صوت")
+                            Text("معاينة صامتة")
                                 .font(.caption2.bold())
                                 .foregroundStyle(.white.opacity(0.72))
                                 .padding(.horizontal, 10)
@@ -307,6 +332,7 @@ private struct SimpleHeroCard: View {
 
 private struct SimpleLivePreview: View {
     @EnvironmentObject var model: AppModel
+    @Environment(\.scenePhase) private var scenePhase
     let item: MediaItem
     @StateObject private var box = SimplePreviewBox()
 
@@ -332,8 +358,14 @@ private struct SimpleLivePreview: View {
             }
         }
         .task(id: item.id) {
-            guard let session = try? model.makePlaybackSession(for: item), let url = session.candidates.first else { return }
+            try? await Task.sleep(nanoseconds: 700_000_000)
+            guard !Task.isCancelled, scenePhase == .active,
+                  let session = try? model.makePlaybackSession(for: item),
+                  let url = session.candidates.first else { return }
             box.start(url: url)
+        }
+        .onChange(of: scenePhase) { phase in
+            if phase != .active { box.stop() }
         }
         .onDisappear { box.stop() }
     }
@@ -357,9 +389,12 @@ private final class SimplePreviewBox: ObservableObject {
     let player = VLCMediaPlayer()
     @Published var ready = false
     private var timer: Timer?
+    private var currentURL: URL?
 
     func start(url: URL) {
+        if currentURL == url, player.isPlaying { return }
         stop()
+        currentURL = url
         guard let media = VLCMedia(url: url) else { return }
         media.addOptions([
             "network-caching": 650,
@@ -380,6 +415,7 @@ private final class SimplePreviewBox: ObservableObject {
         timer?.invalidate()
         timer = nil
         player.stop()
+        currentURL = nil
         ready = false
     }
 }
@@ -448,6 +484,7 @@ private struct SimpleUtilityButton: View {
 }
 
 private struct SimpleSection: View {
+    @EnvironmentObject var model: AppModel
     let title: String
     let subtitle: String
     let items: [MediaItem]
@@ -472,10 +509,40 @@ private struct SimpleSection: View {
                             else { DetailsView(item: item) }
                         } label: {
                             VStack(alignment: .leading, spacing: 7) {
-                                Poster(url: item.poster)
-                                    .frame(width: 138, height: 188)
-                                    .clipShape(RoundedRectangle(cornerRadius: 16))
-                                    .overlay(RoundedRectangle(cornerRadius: 16).stroke(BlofyTheme.divider))
+                                ZStack(alignment: .topTrailing) {
+                                    Poster(url: item.poster)
+                                        .frame(width: 138, height: 188)
+                                        .clipShape(RoundedRectangle(cornerRadius: 16))
+                                        .overlay(RoundedRectangle(cornerRadius: 16).stroke(BlofyTheme.divider))
+
+                                    if model.favorites.contains(item.id) {
+                                        Image(systemName: "heart.fill")
+                                            .font(.caption.bold())
+                                            .foregroundStyle(BlofyTheme.purpleBright)
+                                            .padding(8)
+                                            .background(.black.opacity(0.62), in: Circle())
+                                            .padding(7)
+                                    }
+
+                                    if let entry = model.resume[item.id], entry.duration > 0 {
+                                        VStack {
+                                            Spacer()
+                                            GeometryReader { geo in
+                                                let progress = min(1, max(0, entry.seconds / entry.duration))
+                                                ZStack(alignment: .leading) {
+                                                    Capsule().fill(.black.opacity(0.55))
+                                                    Capsule().fill(BlofyTheme.purpleBright)
+                                                        .frame(width: geo.size.width * progress)
+                                                }
+                                            }
+                                            .frame(height: 4)
+                                            .padding(.horizontal, 8)
+                                            .padding(.bottom, 8)
+                                        }
+                                        .frame(width: 138, height: 188)
+                                    }
+                                }
+
                                 Text(item.name)
                                     .font(.caption.bold())
                                     .foregroundStyle(BlofyTheme.textPrimary)
