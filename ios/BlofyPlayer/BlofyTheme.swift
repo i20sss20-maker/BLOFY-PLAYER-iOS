@@ -19,27 +19,61 @@ enum BlofyTheme {
     static let divider = Color(red: 53/255, green: 44/255, blue: 64/255)
 
     static var backgroundGradient: LinearGradient {
-        LinearGradient(colors: [background, Color(red: 18/255, green: 11/255, blue: 28/255)], startPoint: .topLeading, endPoint: .bottomTrailing)
+        LinearGradient(
+            colors: [background, Color(red: 18/255, green: 11/255, blue: 28/255), background],
+            startPoint: .topLeading,
+            endPoint: .bottomTrailing
+        )
     }
 
     static var heroGradient: LinearGradient {
-        LinearGradient(colors: [Color(red: 86/255, green: 49/255, blue: 124/255), Color(red: 36/255, green: 23/255, blue: 47/255)], startPoint: .topLeading, endPoint: .bottomTrailing)
+        LinearGradient(
+            colors: [Color(red: 91/255, green: 50/255, blue: 134/255), Color(red: 42/255, green: 25/255, blue: 57/255), backgroundRaised],
+            startPoint: .topLeading,
+            endPoint: .bottomTrailing
+        )
     }
 
     static var primaryGradient: LinearGradient {
         LinearGradient(colors: [purpleBright, Color(red: 117/255, green: 64/255, blue: 199/255)], startPoint: .leading, endPoint: .trailing)
     }
+
+    static var glassGradient: LinearGradient {
+        LinearGradient(
+            colors: [Color.white.opacity(0.055), purple.opacity(0.055), Color.white.opacity(0.018)],
+            startPoint: .topLeading,
+            endPoint: .bottomTrailing
+        )
+    }
 }
 
 struct BlofyPanel: ViewModifier {
     var radius: CGFloat = 20
+
     func body(content: Content) -> some View {
         content
             .background(
-                LinearGradient(colors: [BlofyTheme.surface.opacity(0.96), BlofyTheme.backgroundRaised.opacity(0.98)], startPoint: .topLeading, endPoint: .bottomTrailing)
+                ZStack {
+                    LinearGradient(
+                        colors: [BlofyTheme.surface.opacity(0.97), BlofyTheme.backgroundRaised.opacity(0.99)],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    )
+                    BlofyTheme.glassGradient
+                }
             )
             .clipShape(RoundedRectangle(cornerRadius: radius, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: radius, style: .continuous).stroke(BlofyTheme.divider, lineWidth: 1))
+            .overlay(
+                RoundedRectangle(cornerRadius: radius, style: .continuous)
+                    .stroke(
+                        LinearGradient(
+                            colors: [Color.white.opacity(0.08), BlofyTheme.divider.opacity(0.85)],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        ),
+                        lineWidth: 1
+                    )
+            )
     }
 }
 
@@ -57,12 +91,23 @@ struct BlofyBrandMark: View {
                 .scaledToFit()
                 .frame(width: compact ? 38 : 58, height: compact ? 38 : 58)
                 .clipShape(RoundedRectangle(cornerRadius: compact ? 9 : 13, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: compact ? 9 : 13, style: .continuous)
+                        .stroke(Color.white.opacity(0.07))
+                )
+                .shadow(color: purple.opacity(compact ? 0.12 : 0.2), radius: compact ? 8 : 14, y: 5)
 
             if !compact {
-                Text("BLOFY PLAYER")
-                    .font(.system(size: 18, weight: .black, design: .rounded))
-                    .tracking(0.7)
-                    .foregroundStyle(BlofyTheme.textPrimary)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text("BLOFY PLAYER")
+                        .font(.system(size: 18, weight: .black, design: .rounded))
+                        .tracking(0.7)
+                        .foregroundStyle(BlofyTheme.textPrimary)
+                    Text("PREMIUM PLAYER")
+                        .font(.system(size: 7, weight: .bold, design: .rounded))
+                        .tracking(1.8)
+                        .foregroundStyle(BlofyTheme.purpleSoft.opacity(0.72))
+                }
             }
         }
     }
