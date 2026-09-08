@@ -144,7 +144,30 @@ final class AppModel: ObservableObject {
     }
 
     func clearCatalog() {
+        // Invalidate callbacks before releasing the loading gate. A request from
+        // the previous playlist may still finish after the user switches servers.
+        syncGeneration = UUID()
+        loading = false
         categories.removeAll(); items.removeAll(); completedStages.removeAll(); loadedSource = ""; progress = 0; status = ""; error = ""; interruptedSync = false
+    }
+
+    // Portal merges retain playlist IDs, but Playlist is a value type: refresh
+    // the selected copy too, and never reuse an in-flight catalog after a login change.
+    func updateSelectedPlaylist(_ updated: Playlist) {
+        guard let current = selected, current.id == updated.id else { return }
+        let connectionChanged = current.type != updated.type || current.url != updated.url ||
+            current.username != updated.username || current.password != updated.password
+        selected = updated
+        guard connectionChanged else { return }
+        clearCatalog()
+        CatalogCacheStore.remove(for: updated.id)
+        let defaults = UserDefaults.standard
+        defaults.removeObject(forKey: checkpointKey(for: updated))
+        if let legacy = defaults.data(forKey: "catalogCheckpoint"),
+           let old = try? JSONDecoder().decode(CatalogCheckpoint.self, from: legacy),
+           old.source == sourceKey(current) || old.source == sourceKey(updated) {
+            defaults.removeObject(forKey: "catalogCheckpoint")
+        }
     }
 
     private func sourceKey(_ playlist: Playlist) -> String { "\(playlist.type)|\(playlist.url)|\(playlist.username)" }
@@ -232,14 +255,14 @@ final class AppModel: ObservableObject {
         let token = UUID(); syncGeneration = token
         do {
             let result = try await ProviderClient.shared.loadCatalog(provider, cachedCategories: categories, cachedItems: items, completedStages: completedStages, progress: { value, text in
-                await MainActor.run { guard self.syncGeneration == token else { return }; self.progress = max(self.progress, value); self.status = text }
+                await MainActor.run { guard self.syncGeneration == token, self.selected?.id == provider.id else { return }; self.progress = max(self.progress, value); self.status = text }
             }, checkpoint: { savedCategories, savedItems, stages, value, text in
-                await MainActor.run { guard self.syncGeneration == token else { return }; self.categories = savedCategories; self.items = savedItems; self.completedStages = stages; self.progress = max(self.progress, value); self.status = text; self.persistCheckpoint(completed: false) }
+                await MainActor.run { guard self.syncGeneration == token, self.selected?.id == provider.id else { return }; self.categories = savedCategories; self.items = savedItems; self.completedStages = stages; self.progress = max(self.progress, value); self.status = text; self.persistCheckpoint(completed: false) }
             })
-            guard syncGeneration == token else { return }
+            guard syncGeneration == token, selected?.id == provider.id else { return }
             categories = result.0; items = result.1; completedStages = expected; loadedSource = source; progress = 1; status = "تم تحميل القوائم بالكامل"; loading = false; interruptedSync = false; persistCheckpoint(completed: true)
         } catch {
-            guard syncGeneration == token else { return }
+            guard syncGeneration == token, selected?.id == provider.id else { return }
             self.error = error.localizedDescription; self.status = "توقف التحميل مؤقتًا · سنكمل من آخر مرحلة محفوظة"; self.loading = false; self.interruptedSync = true; persistCheckpoint(completed: false)
         }
     }
