@@ -10,6 +10,23 @@ LOGO_URL="https://raw.githubusercontent.com/i20sss20-maker/BLOFY-PLAYER-2.0/rc07
 curl -fL --retry 3 --retry-delay 2 "$LOGO_URL" -o BlofyPlayer/Resources/blofy_logo.png
 [[ -s BlofyPlayer/Resources/blofy_logo.png ]]
 
+# Produce real iPhone/iPad app icons from the bundled BLOFY logo. Preserve the
+# logo aspect ratio and pad it on the BLOFY dark background instead of stretching it.
+make_icon() {
+  local size="$1" out="$2" inner
+  inner=$(( size * 82 / 100 ))
+  cp BlofyPlayer/Resources/blofy_logo.png "build/icon-work.png"
+  /usr/bin/sips -Z "$inner" "build/icon-work.png" >/dev/null
+  /usr/bin/sips -p "$size" "$size" --padColor 100810 "build/icon-work.png" --out "BlofyPlayer/Resources/$out" >/dev/null
+  [[ -s "BlofyPlayer/Resources/$out" ]]
+}
+make_icon 120 'Icon-60@2x.png'
+make_icon 180 'Icon-60@3x.png'
+make_icon 76 'Icon-76.png'
+make_icon 152 'Icon-76@2x.png'
+make_icon 167 'Icon-83.5@2x.png'
+rm -f build/icon-work.png
+
 # Keep the live page source stable while routing fullscreen live playback through
 # the dedicated channel-zapping wrapper at build time.
 python3 - <<'PY'
@@ -172,6 +189,7 @@ xcodebuild -project BlofyPlayer.xcodeproj -scheme BlofyPlayer -configuration Rel
 APP=build/DerivedData/Build/Products/Release-iphoneos/BlofyPlayer.app
 [[ -d "$APP" && -s "$APP/BlofyPlayer" ]]
 [[ -s "$APP/blofy_logo.png" ]]
+[[ -s "$APP/Icon-60@2x.png" && -s "$APP/Icon-60@3x.png" ]]
 [[ -s "$APP/Frameworks/VLCKit.framework/VLCKit" ]]
 xcrun lipo "$APP/BlofyPlayer" -verify_arch arm64
 xcrun lipo "$APP/Frameworks/VLCKit.framework/VLCKit" -verify_arch arm64
