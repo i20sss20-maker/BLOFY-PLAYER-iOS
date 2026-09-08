@@ -6,6 +6,7 @@ struct SimpleRootView: View {
     @Environment(\.scenePhase) private var scenePhase
     @State private var showAdd = false
     @State private var tab = 0
+    let onLogout: () -> Void
 
     var body: some View {
         ZStack {
@@ -15,7 +16,7 @@ struct SimpleRootView: View {
                 EmptyHome(showAdd: $showAdd)
             } else {
                 TabView(selection: $tab) {
-                    SimpleHomeView(tab: $tab, showAdd: $showAdd)
+                    SimpleHomeView(tab: $tab, showAdd: $showAdd, onLogout: onLogout)
                         .tabItem { Label("الرئيسية", systemImage: "house.fill") }
                         .tag(0)
 
@@ -54,6 +55,8 @@ private struct SimpleHomeView: View {
     @EnvironmentObject var model: AppModel
     @Binding var tab: Int
     @Binding var showAdd: Bool
+    let onLogout: () -> Void
+    @State private var showLogoutConfirm = false
 
     private var continueItems: [MediaItem] {
         Array(model.resume.values.sorted { $0.updatedAt > $1.updatedAt }.map(\.item).prefix(12))
@@ -66,19 +69,31 @@ private struct SimpleHomeView: View {
 
     var body: some View {
         NavigationStack {
-            ScrollView {
+            ScrollView(showsIndicators: false) {
                 VStack(alignment: .leading, spacing: 22) {
-                    HStack {
+                    HStack(spacing: 10) {
                         BlofyBrandMark()
                         Spacer()
+
                         NavigationLink { SearchView() } label: {
                             Image(systemName: "magnifyingglass")
                                 .font(.headline)
-                                .frame(width: 44, height: 44)
+                                .frame(width: 42, height: 42)
                                 .background(BlofyTheme.surfaceRaised, in: Circle())
+                                .overlay(Circle().stroke(BlofyTheme.divider))
                         }
                         .buttonStyle(.plain)
                         .foregroundStyle(BlofyTheme.textPrimary)
+
+                        Button { showLogoutConfirm = true } label: {
+                            Image(systemName: "rectangle.portrait.and.arrow.right")
+                                .font(.headline)
+                                .frame(width: 42, height: 42)
+                                .background(BlofyTheme.surfaceRaised, in: Circle())
+                                .overlay(Circle().stroke(BlofyTheme.error.opacity(0.35)))
+                        }
+                        .buttonStyle(.plain)
+                        .foregroundStyle(BlofyTheme.error)
                     }
                     .padding(.horizontal, 16)
                     .padding(.top, 8)
@@ -93,7 +108,7 @@ private struct SimpleHomeView: View {
                     .padding(.horizontal, 16)
 
                     VStack(alignment: .leading, spacing: 12) {
-                        Text("وش تبي تشاهد؟")
+                        Text("اختر وجهتك")
                             .font(.title3.bold())
                             .foregroundStyle(BlofyTheme.textPrimary)
                             .padding(.horizontal, 16)
@@ -135,6 +150,12 @@ private struct SimpleHomeView: View {
             .background(BlofyTheme.backgroundGradient)
             .toolbar(.hidden, for: .navigationBar)
             .refreshable { await model.loadCatalog(force: true) }
+            .alert("تسجيل الخروج؟", isPresented: $showLogoutConfirm) {
+                Button("إلغاء", role: .cancel) {}
+                Button("تسجيل خروج", role: .destructive) { onLogout() }
+            } message: {
+                Text("بنرجع لصفحة الدخول فقط. السيرفرات والمفضلة والتقدم المحفوظ ما راح تنحذف.")
+            }
         }
     }
 }
@@ -158,14 +179,25 @@ private struct SimpleHeroCard: View {
 
             LinearGradient(colors: [.clear, .black.opacity(0.18), BlofyTheme.background.opacity(0.96)], startPoint: .top, endPoint: .bottom)
 
-            VStack(alignment: .leading, spacing: 8) {
-                Text(featured?.kind == .live ? "البث المباشر" : "BLOFY PLAYER")
-                    .font(.caption.bold())
-                    .foregroundStyle(BlofyTheme.mint)
+            VStack(alignment: .leading, spacing: 9) {
+                HStack(spacing: 7) {
+                    Circle().fill(BlofyTheme.mint).frame(width: 7, height: 7)
+                    Text(featured?.kind == .live ? "جاهز للبث" : "BLOFY PLAYER")
+                        .font(.caption.bold())
+                        .foregroundStyle(BlofyTheme.mint)
+                }
+
                 Text(featured?.name ?? model.selected?.name ?? "جاهز للمشاهدة")
                     .font(.system(size: 25, weight: .black))
                     .foregroundStyle(BlofyTheme.textPrimary)
                     .lineLimit(2)
+
+                if let server = model.selected?.name {
+                    Label(server, systemImage: "server.rack")
+                        .font(.caption)
+                        .foregroundStyle(.white.opacity(0.72))
+                        .lineLimit(1)
+                }
 
                 HStack(spacing: 10) {
                     if let featured {
