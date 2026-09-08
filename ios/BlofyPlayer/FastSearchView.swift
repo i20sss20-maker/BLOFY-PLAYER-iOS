@@ -6,6 +6,7 @@ struct FastSearchView: View {
     @State private var results: [MediaItem] = []
     @State private var searching = false
     @State private var searchTask: Task<Void, Never>?
+    @State private var generation = UUID()
 
     var body: some View {
         NavigationStack {
@@ -69,15 +70,24 @@ struct FastSearchView: View {
             .onChange(of: query) { value in
                 scheduleSearch(value)
             }
+            .onChange(of: model.items.count) { _ in
+                if !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    scheduleSearch(query, debounceNanoseconds: 80_000_000)
+                }
+            }
             .onDisappear {
                 searchTask?.cancel()
+                generation = UUID()
             }
         }
     }
 
-    private func scheduleSearch(_ raw: String) {
+    private func scheduleSearch(_ raw: String, debounceNanoseconds: UInt64 = 180_000_000) {
         searchTask?.cancel()
         let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        let ticket = UUID()
+        generation = ticket
+
         guard !trimmed.isEmpty else {
             searching = false
             results = []
@@ -85,24 +95,24 @@ struct FastSearchView: View {
         }
 
         searching = true
-        searchTask = Task {
-            try? await Task.sleep(nanoseconds: 380_000_000)
-            guard !Task.isCancelled else { return }
-            let needle = normalizedSearch(trimmed)
-            let snapshot = model.items
+        let snapshot = model.items
+        let sourceID = model.selected?.id
 
-            var found: [MediaItem] = []
-            found.reserveCapacity(80)
-            for item in snapshot {
-                if Task.isCancelled { return }
-                if normalizedSearch(item.name).contains(needle) {
-                    found.append(item)
-                    if found.count >= 120 { break }
-                }
-            }
+        searchTask = Task {
+            do { try await Task.sleep(nanoseconds: debounceNanoseconds) }
+            catch { return }
+            guard !Task.isCancelled else { return }
+
+            let found = await MediaSearchEngine.shared.search(
+                items: snapshot,
+                query: trimmed,
+                sourceID: sourceID,
+                limit: 120
+            )
 
             guard !Task.isCancelled else { return }
             await MainActor.run {
+                guard generation == ticket else { return }
                 results = found
                 searching = false
             }
