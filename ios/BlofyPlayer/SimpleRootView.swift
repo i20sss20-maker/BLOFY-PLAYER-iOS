@@ -70,55 +70,40 @@ private struct SimpleHomeView: View {
     var body: some View {
         NavigationStack {
             ScrollView(showsIndicators: false) {
-                VStack(alignment: .leading, spacing: 22) {
-                    HStack(spacing: 10) {
-                        BlofyBrandMark()
-                        Spacer()
-
-                        NavigationLink { SearchView() } label: {
-                            Image(systemName: "magnifyingglass")
-                                .font(.headline)
-                                .frame(width: 42, height: 42)
-                                .background(BlofyTheme.surfaceRaised, in: Circle())
-                                .overlay(Circle().stroke(BlofyTheme.divider))
-                        }
-                        .buttonStyle(.plain)
-                        .foregroundStyle(BlofyTheme.textPrimary)
-
-                        Button { showLogoutConfirm = true } label: {
-                            Image(systemName: "rectangle.portrait.and.arrow.right")
-                                .font(.headline)
-                                .frame(width: 42, height: 42)
-                                .background(BlofyTheme.surfaceRaised, in: Circle())
-                                .overlay(Circle().stroke(BlofyTheme.error.opacity(0.35)))
-                        }
-                        .buttonStyle(.plain)
-                        .foregroundStyle(BlofyTheme.error)
-                    }
-                    .padding(.horizontal, 16)
-                    .padding(.top, 8)
+                VStack(alignment: .leading, spacing: 24) {
+                    ServerHeader(showLogoutConfirm: $showLogoutConfirm)
 
                     SimpleHeroCard(tab: $tab)
 
-                    HStack(spacing: 8) {
-                        SimpleStat(value: liveCount, title: "قناة")
-                        SimpleStat(value: movieCount, title: "فيلم")
-                        SimpleStat(value: seriesCount, title: "مسلسل")
+                    HStack(spacing: 9) {
+                        SimpleStat(value: liveCount, title: "قناة", icon: "tv.fill")
+                        SimpleStat(value: movieCount, title: "فيلم", icon: "film.fill")
+                        SimpleStat(value: seriesCount, title: "مسلسل", icon: "play.rectangle.on.rectangle.fill")
                     }
                     .padding(.horizontal, 16)
 
                     VStack(alignment: .leading, spacing: 12) {
-                        Text("اختر وجهتك")
+                        Text("استكشف BLOFY")
                             .font(.title3.bold())
                             .foregroundStyle(BlofyTheme.textPrimary)
                             .padding(.horizontal, 16)
 
                         HStack(spacing: 10) {
-                            SimpleLaunchButton(title: "البث", subtitle: "القنوات", icon: "tv.fill") { tab = 1 }
-                            SimpleLaunchButton(title: "الأفلام", subtitle: "المكتبة", icon: "film.fill") { tab = 2 }
-                            SimpleLaunchButton(title: "المسلسلات", subtitle: "الحلقات", icon: "play.rectangle.on.rectangle.fill") { tab = 3 }
+                            SimpleLaunchButton(title: "البث", subtitle: "شاهد الآن", icon: "tv.fill") { tab = 1 }
+                            SimpleLaunchButton(title: "الأفلام", subtitle: "مكتبتك", icon: "film.fill") { tab = 2 }
+                            SimpleLaunchButton(title: "المسلسلات", subtitle: "المواسم", icon: "play.rectangle.on.rectangle.fill") { tab = 3 }
                         }
                         .padding(.horizontal, 16)
+                    }
+
+                    if !continueItems.isEmpty {
+                        SimpleSection(title: "متابعة المشاهدة", subtitle: "كمل من آخر نقطة", items: continueItems)
+                    }
+                    if !movies.isEmpty {
+                        SimpleSection(title: "أفلام", subtitle: "اختيارات من السيرفر", items: movies)
+                    }
+                    if !series.isEmpty {
+                        SimpleSection(title: "مسلسلات", subtitle: "مواسم وحلقات", items: series)
                     }
 
                     HStack(spacing: 10) {
@@ -134,16 +119,7 @@ private struct SimpleHomeView: View {
                         .buttonStyle(.plain)
                     }
                     .padding(.horizontal, 16)
-
-                    if !continueItems.isEmpty {
-                        SimpleSection(title: "متابعة المشاهدة", items: continueItems)
-                    }
-                    if !movies.isEmpty {
-                        SimpleSection(title: "أفلام", items: movies)
-                    }
-                    if !series.isEmpty {
-                        SimpleSection(title: "مسلسلات", items: series)
-                    }
+                    .padding(.bottom, 10)
                 }
                 .padding(.vertical, 12)
             }
@@ -160,6 +136,62 @@ private struct SimpleHomeView: View {
     }
 }
 
+private struct ServerHeader: View {
+    @EnvironmentObject var model: AppModel
+    @Binding var showLogoutConfirm: Bool
+
+    var body: some View {
+        HStack(spacing: 12) {
+            BlofyBrandMark(compact: true)
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text(model.selected?.name ?? "BLOFY Server")
+                    .font(.subheadline.bold())
+                    .foregroundStyle(BlofyTheme.textPrimary)
+                    .lineLimit(1)
+                HStack(spacing: 6) {
+                    Circle().fill(BlofyTheme.mint).frame(width: 6, height: 6)
+                    Text("متصل وجاهز")
+                        .font(.caption2.bold())
+                        .foregroundStyle(BlofyTheme.textMuted)
+                }
+            }
+
+            Spacer()
+
+            NavigationLink { SearchView() } label: {
+                HeaderCircle(icon: "magnifyingglass", tint: BlofyTheme.textPrimary)
+            }
+            .buttonStyle(.plain)
+
+            Menu {
+                Button { } label: { Label(model.selected?.name ?? "السيرفر", systemImage: "server.rack") }
+                Divider()
+                Button(role: .destructive) { showLogoutConfirm = true } label: {
+                    Label("تسجيل الخروج", systemImage: "rectangle.portrait.and.arrow.right")
+                }
+            } label: {
+                HeaderCircle(icon: "person.crop.circle", tint: BlofyTheme.purpleSoft)
+            }
+        }
+        .padding(.horizontal, 16)
+        .padding(.top, 4)
+    }
+}
+
+private struct HeaderCircle: View {
+    let icon: String
+    let tint: Color
+    var body: some View {
+        Image(systemName: icon)
+            .font(.headline)
+            .foregroundStyle(tint)
+            .frame(width: 42, height: 42)
+            .background(BlofyTheme.surfaceRaised, in: Circle())
+            .overlay(Circle().stroke(BlofyTheme.divider))
+    }
+}
+
 private struct SimpleHeroCard: View {
     @EnvironmentObject var model: AppModel
     @Binding var tab: Int
@@ -173,58 +205,62 @@ private struct SimpleHeroCard: View {
         ZStack(alignment: .bottomLeading) {
             if let featured {
                 Poster(url: featured.poster)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .clipped()
             } else {
-                LinearGradient(colors: [BlofyTheme.purpleDeep, BlofyTheme.surfaceRaised], startPoint: .topLeading, endPoint: .bottomTrailing)
+                BlofyTheme.heroGradient
             }
 
-            LinearGradient(colors: [.clear, .black.opacity(0.18), BlofyTheme.background.opacity(0.96)], startPoint: .top, endPoint: .bottom)
+            LinearGradient(
+                colors: [.clear, .black.opacity(0.14), BlofyTheme.background.opacity(0.98)],
+                startPoint: .top,
+                endPoint: .bottom
+            )
 
-            VStack(alignment: .leading, spacing: 9) {
+            VStack(alignment: .leading, spacing: 10) {
                 HStack(spacing: 7) {
                     Circle().fill(BlofyTheme.mint).frame(width: 7, height: 7)
-                    Text(featured?.kind == .live ? "جاهز للبث" : "BLOFY PLAYER")
+                    Text(featured?.kind == .live ? "على الهواء الآن" : "مختار لك")
                         .font(.caption.bold())
                         .foregroundStyle(BlofyTheme.mint)
                 }
 
-                Text(featured?.name ?? model.selected?.name ?? "جاهز للمشاهدة")
-                    .font(.system(size: 25, weight: .black))
+                Text(featured?.name ?? "جاهز للمشاهدة")
+                    .font(.system(size: 27, weight: .black))
                     .foregroundStyle(BlofyTheme.textPrimary)
                     .lineLimit(2)
 
                 if let server = model.selected?.name {
-                    Label(server, systemImage: "server.rack")
+                    Text(server)
                         .font(.caption)
-                        .foregroundStyle(.white.opacity(0.72))
+                        .foregroundStyle(.white.opacity(0.64))
                         .lineLimit(1)
                 }
 
-                HStack(spacing: 10) {
-                    if let featured {
-                        Button {
-                            if featured.kind == .live {
-                                tab = 1
-                            } else if let session = try? model.makePlaybackSession(for: featured) {
-                                play = session
-                            }
-                        } label: {
-                            Label(featured.kind == .live ? "فتح البث" : "شاهد الآن", systemImage: "play.fill")
-                                .font(.subheadline.bold())
-                                .padding(.horizontal, 15)
-                                .padding(.vertical, 10)
-                                .background(.white, in: Capsule())
-                                .foregroundStyle(.black)
+                if let featured {
+                    Button {
+                        if featured.kind == .live {
+                            tab = 1
+                        } else if let session = try? model.makePlaybackSession(for: featured) {
+                            play = session
                         }
-                        .buttonStyle(.plain)
+                    } label: {
+                        Label(featured.kind == .live ? "فتح البث" : "شاهد الآن", systemImage: "play.fill")
+                            .font(.subheadline.bold())
+                            .padding(.horizontal, 16)
+                            .padding(.vertical, 11)
+                            .background(.white, in: Capsule())
+                            .foregroundStyle(.black)
                     }
+                    .buttonStyle(.plain)
                 }
             }
-            .padding(18)
+            .padding(20)
         }
-        .frame(height: 238)
-        .clipShape(RoundedRectangle(cornerRadius: 26, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 26).stroke(BlofyTheme.purpleSoft.opacity(0.24)))
-        .shadow(color: BlofyTheme.purple.opacity(0.15), radius: 20, y: 10)
+        .frame(height: 252)
+        .clipShape(RoundedRectangle(cornerRadius: 28, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 28).stroke(BlofyTheme.purpleSoft.opacity(0.18)))
+        .shadow(color: .black.opacity(0.28), radius: 22, y: 14)
         .padding(.horizontal, 16)
         .fullScreenCover(item: $play) { PlayerScreen(session: $0) }
     }
@@ -233,14 +269,22 @@ private struct SimpleHeroCard: View {
 private struct SimpleStat: View {
     let value: Int
     let title: String
+    let icon: String
+
     var body: some View {
-        VStack(spacing: 2) {
-            Text("\(value)").font(.headline.bold()).monospacedDigit().foregroundStyle(BlofyTheme.textPrimary)
-            Text(title).font(.caption2).foregroundStyle(BlofyTheme.textMuted)
+        HStack(spacing: 8) {
+            Image(systemName: icon)
+                .font(.caption.bold())
+                .foregroundStyle(BlofyTheme.purpleBright)
+            VStack(alignment: .leading, spacing: 1) {
+                Text("\(value)").font(.subheadline.bold()).monospacedDigit().foregroundStyle(BlofyTheme.textPrimary)
+                Text(title).font(.caption2).foregroundStyle(BlofyTheme.textMuted)
+            }
         }
-        .frame(maxWidth: .infinity)
-        .padding(.vertical, 10)
-        .blofyPanel(radius: 14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 11)
+        .padding(.vertical, 11)
+        .blofyPanel(radius: 15)
     }
 }
 
@@ -252,14 +296,17 @@ private struct SimpleLaunchButton: View {
 
     var body: some View {
         Button(action: action) {
-            VStack(spacing: 8) {
-                Image(systemName: icon).font(.title2).foregroundStyle(BlofyTheme.purpleBright)
+            VStack(alignment: .leading, spacing: 9) {
+                ZStack {
+                    Circle().fill(BlofyTheme.purple.opacity(0.15)).frame(width: 40, height: 40)
+                    Image(systemName: icon).font(.headline).foregroundStyle(BlofyTheme.purpleBright)
+                }
                 Text(title).font(.subheadline.bold()).foregroundStyle(BlofyTheme.textPrimary)
                 Text(subtitle).font(.caption2).foregroundStyle(BlofyTheme.textMuted)
             }
-            .frame(maxWidth: .infinity)
-            .padding(.vertical, 15)
-            .blofyPanel(radius: 18)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(14)
+            .blofyPanel(radius: 19)
         }
         .buttonStyle(.plain)
     }
@@ -276,7 +323,7 @@ private struct SimpleUtilityButton: View {
         .font(.caption.bold())
         .foregroundStyle(BlofyTheme.textSecondary)
         .frame(maxWidth: .infinity)
-        .padding(.vertical, 10)
+        .padding(.vertical, 11)
         .background(BlofyTheme.surfaceRaised, in: RoundedRectangle(cornerRadius: 14))
         .overlay(RoundedRectangle(cornerRadius: 14).stroke(BlofyTheme.divider))
     }
@@ -284,29 +331,38 @@ private struct SimpleUtilityButton: View {
 
 private struct SimpleSection: View {
     let title: String
+    let subtitle: String
     let items: [MediaItem]
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text(title)
-                .font(.headline.bold())
-                .foregroundStyle(BlofyTheme.textPrimary)
-                .padding(.horizontal, 16)
+        VStack(alignment: .leading, spacing: 11) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                    .font(.headline.bold())
+                    .foregroundStyle(BlofyTheme.textPrimary)
+                Text(subtitle)
+                    .font(.caption2)
+                    .foregroundStyle(BlofyTheme.textMuted)
+            }
+            .padding(.horizontal, 16)
+
             ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 11) {
+                HStack(spacing: 12) {
                     ForEach(items) { item in
                         NavigationLink {
                             if item.kind == .series { SeriesDetailsView(series: item) }
                             else { DetailsView(item: item) }
                         } label: {
-                            VStack(alignment: .leading, spacing: 6) {
+                            VStack(alignment: .leading, spacing: 7) {
                                 Poster(url: item.poster)
-                                    .frame(width: 132, height: 178)
-                                    .clipShape(RoundedRectangle(cornerRadius: 14))
+                                    .frame(width: 138, height: 188)
+                                    .clipShape(RoundedRectangle(cornerRadius: 16))
+                                    .overlay(RoundedRectangle(cornerRadius: 16).stroke(BlofyTheme.divider))
                                 Text(item.name)
                                     .font(.caption.bold())
                                     .foregroundStyle(BlofyTheme.textPrimary)
                                     .lineLimit(1)
-                                    .frame(width: 132, alignment: .leading)
+                                    .frame(width: 138, alignment: .leading)
                             }
                         }
                         .buttonStyle(.plain)
