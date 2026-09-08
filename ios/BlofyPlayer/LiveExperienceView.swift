@@ -102,26 +102,21 @@ struct LiveExperienceView: View {
     @State private var favoritesOnly = false
     @State private var showCategories = false
     @State private var searchTask: Task<Void, Never>?
+    @State private var liveChannels: [MediaItem] = []
+    @State private var visibleChannels: [MediaItem] = []
+    @State private var renderLimit = 250
     @StateObject private var preview = LivePreviewController()
 
     private var categories: [MediaCategory] { model.categories.filter { $0.kind == .live } }
-    private var allChannels: [MediaItem] { model.items.filter { $0.kind == .live } }
     private var categoryTitle: String {
         selectedCategory == "all" ? "كل الفئات" : (categories.first { $0.key == selectedCategory }?.name ?? "الفئة")
     }
-    private var shown: [MediaItem] {
-        let q = committedQuery.isEmpty ? "" : normalizedSearch(committedQuery)
-        return allChannels.filter {
-            (selectedCategory == "all" || $0.categoryID == selectedCategory) &&
-            (!favoritesOnly || model.favorites.contains($0.id)) &&
-            (q.isEmpty || normalizedSearch($0.name).contains(q))
-        }
-    }
-    private var selected: MediaItem? { allChannels.first { $0.id == selectedID } ?? shown.first }
+    private var selected: MediaItem? { liveChannels.first { $0.id == selectedID } ?? visibleChannels.first }
     private var recentChannels: [MediaItem] {
-        let map = Dictionary(uniqueKeysWithValues: allChannels.map { ($0.id, $0) })
+        let map = Dictionary(uniqueKeysWithValues: liveChannels.map { ($0.id, $0) })
         return recentIDs.compactMap { map[$0] }
     }
+    private var renderedChannels: ArraySlice<MediaItem> { visibleChannels.prefix(renderLimit) }
 
     var body: some View {
         NavigationStack {
@@ -142,11 +137,14 @@ struct LiveExperienceView: View {
                         )
                         .padding(.horizontal, 16)
                         .task(id: selected.id) { await select(selected, autoplay: true) }
-                        .gesture(
-                            DragGesture(minimumDistance: 30)
+                        .simultaneousGesture(
+                            DragGesture(minimumDistance: 36)
                                 .onEnded { value in
-                                    if value.translation.width < -50 { step(1) }
-                                    else if value.translation.width > 50 { step(-1) }
+                                    let horizontal = abs(value.translation.width)
+                                    let vertical = abs(value.translation.height)
+                                    guard horizontal > vertical * 1.45 else { return }
+                                    if value.translation.width < -55 { step(1) }
+                                    else if value.translation.width > 55 { step(-1) }
                                 }
                         )
                     }
@@ -160,29 +158,38 @@ struct LiveExperienceView: View {
             .background(BlofyTheme.backgroundGradient)
             .toolbar(.hidden, for: .navigationBar)
             .searchable(text: $query, prompt: "ابحث عن قناة")
-            .refreshable { await model.loadCatalog(force: true) }
+            .refreshable {
+                await model.loadCatalog(force: true)
+                refreshChannelCache()
+            }
             .sheet(isPresented: $showCategories) {
                 LiveCategoryBrowserSheet(categories: categories, selected: $selectedCategory)
-                    .presentationDetents([.medium, .large])
+                    .presentationDetents([.large])
                     .presentationDragIndicator(.visible)
             }
             .onChange(of: query) { newValue in
                 searchTask?.cancel()
                 searchTask = Task {
-                    try? await Task.sleep(nanoseconds: 320_000_000)
+                    try? await Task.sleep(nanoseconds: 380_000_000)
                     guard !Task.isCancelled else { return }
-                    await MainActor.run { committedQuery = newValue }
+                    await MainActor.run {
+                        committedQuery = newValue
+                        rebuildVisibleChannels()
+                    }
                 }
             }
             .onChange(of: selectedCategory) { _ in
                 selectedID = ""
                 programs = []
                 preview.stop()
+                rebuildVisibleChannels()
             }
+            .onChange(of: favoritesOnly) { _ in rebuildVisibleChannels() }
+            .onChange(of: model.items.count) { _ in refreshChannelCache() }
             .onAppear {
                 recentIDs = RecentLiveStore.ids()
                 committedQuery = query
-                if selectedID.isEmpty { selectedID = recentChannels.first?.id ?? allChannels.first?.id ?? "" }
+                refreshChannelCache()
             }
             .onReceive(NotificationCenter.default.publisher(for: .blofyRecentLiveChanged)) { _ in recentIDs = RecentLiveStore.ids() }
             .onDisappear {
@@ -201,7 +208,7 @@ struct LiveExperienceView: View {
             Spacer()
             VStack(alignment: .trailing, spacing: 2) {
                 Text("البث المباشر").font(.title2.bold())
-                Text("\(shown.count) قناة").font(.caption2).foregroundStyle(BlofyTheme.textMuted)
+                Text("\(visibleChannels.count) قناة").font(.caption2).foregroundStyle(BlofyTheme.textMuted)
             }
         }
         .padding(.horizontal, 16).padding(.top, 8)
@@ -261,7 +268,7 @@ struct LiveExperienceView: View {
 
     private var channelList: some View {
         LazyVStack(spacing: 8) {
-            ForEach(shown) { item in
+            ForEach(Array(renderedChannels)) { item in
                 LiveSmartRow(item: item, isSelected: selected?.id == item.id) {
                     selectedID = item.id
                 } watch: {
@@ -269,21 +276,52 @@ struct LiveExperienceView: View {
                 } favorite: {
                     model.toggleFavorite(item)
                 }
+                .onAppear {
+                    if item.id == renderedChannels.last?.id,
+                       renderLimit < visibleChannels.count {
+                        renderLimit = min(renderLimit + 250, visibleChannels.count)
+                    }
+                }
             }
-            if shown.isEmpty {
+            if visibleChannels.isEmpty {
                 VStack(spacing: 10) {
                     Image(systemName: favoritesOnly ? "heart.slash" : "tv.slash").font(.largeTitle).foregroundStyle(BlofyTheme.textMuted)
                     Text(favoritesOnly ? "ما عندك قنوات مفضلة هنا" : "ما فيه قنوات مطابقة").foregroundStyle(BlofyTheme.textMuted)
                 }.frame(maxWidth: .infinity).padding(.vertical, 40)
+            } else if renderLimit < visibleChannels.count {
+                ProgressView().tint(BlofyTheme.purpleBright).padding(.vertical, 18)
             }
         }.padding(.horizontal, 16).padding(.bottom, 30)
     }
 
+    private func refreshChannelCache() {
+        liveChannels = model.items.filter { $0.kind == .live }
+        rebuildVisibleChannels()
+        if selectedID.isEmpty || !liveChannels.contains(where: { $0.id == selectedID }) {
+            selectedID = recentChannels.first?.id ?? visibleChannels.first?.id ?? liveChannels.first?.id ?? ""
+        }
+    }
+
+    private func rebuildVisibleChannels() {
+        let q = committedQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+        let normalized = q.isEmpty ? "" : normalizedSearch(q)
+        visibleChannels = liveChannels.filter { item in
+            if selectedCategory != "all" && item.categoryID != selectedCategory { return false }
+            if favoritesOnly && !model.favorites.contains(item.id) { return false }
+            if normalized.isEmpty { return true }
+            return normalizedSearch(item.name).contains(normalized)
+        }
+        renderLimit = min(250, max(visibleChannels.count, 1))
+        if selectedID.isEmpty || !visibleChannels.contains(where: { $0.id == selectedID }) {
+            selectedID = visibleChannels.first?.id ?? ""
+        }
+    }
+
     private func step(_ delta: Int) {
-        guard !shown.isEmpty else { return }
-        let current = shown.firstIndex { $0.id == selected?.id } ?? 0
-        let next = (current + delta + shown.count) % shown.count
-        withAnimation(.easeOut(duration: 0.15)) { selectedID = shown[next].id }
+        guard !visibleChannels.isEmpty else { return }
+        let current = visibleChannels.firstIndex { $0.id == selected?.id } ?? 0
+        let next = (current + delta + visibleChannels.count) % visibleChannels.count
+        withAnimation(.easeOut(duration: 0.15)) { selectedID = visibleChannels[next].id }
     }
 
     private func select(_ item: MediaItem, autoplay: Bool) async {
@@ -310,10 +348,12 @@ private struct LiveCategoryBrowserSheet: View {
     let categories: [MediaCategory]
     @Binding var selected: String
     @State private var query = ""
+    @State private var committedQuery = ""
+    @State private var searchTask: Task<Void, Never>?
 
     private var filtered: [MediaCategory] {
-        guard !query.isEmpty else { return categories }
-        let q = normalizedSearch(query)
+        guard !committedQuery.isEmpty else { return categories }
+        let q = normalizedSearch(committedQuery)
         return categories.filter { normalizedSearch($0.name).contains(q) }
     }
 
@@ -327,12 +367,22 @@ private struct LiveCategoryBrowserSheet: View {
                     }
                 }
                 .padding(16)
-                .padding(.bottom, 30)
+                .padding(.bottom, 60)
             }
+            .scrollDismissesKeyboard(.interactively)
             .background(BlofyTheme.backgroundGradient)
             .navigationTitle("فئات البث")
             .navigationBarTitleDisplayMode(.inline)
             .searchable(text: $query, prompt: "ابحث عن فئة")
+            .onChange(of: query) { value in
+                searchTask?.cancel()
+                searchTask = Task {
+                    try? await Task.sleep(nanoseconds: 280_000_000)
+                    guard !Task.isCancelled else { return }
+                    await MainActor.run { committedQuery = value }
+                }
+            }
+            .onDisappear { searchTask?.cancel() }
             .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("تم") { dismiss() } } }
         }
         .preferredColorScheme(.dark)
