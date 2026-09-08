@@ -34,6 +34,13 @@ p = Path('BlofyPlayer/LiveExperienceView.swift')
 s = p.read_text()
 s = s.replace('}) { PlayerScreen(session: $0) }', '}) { LiveFullScreenPlayer(initial: $0) }')
 p.write_text(s)
+
+# Xcode 16.4 / Swift 5 compatibility for explicit black title weights.
+for name in ['CatalogViews.swift', 'LibrarySettingsViews.swift']:
+    q = Path('BlofyPlayer') / name
+    text = q.read_text()
+    text = text.replace('.title2.black()', '.title2.weight(.black)')
+    q.write_text(text)
 PY
 
 VLC_ZIP="build/VLCKit.zip"
@@ -64,7 +71,7 @@ cp -R "$APP" build/package/Payload/
 rm -rf build/package/Payload/BlofyPlayer.app/_CodeSignature
 rm -f build/package/Payload/BlofyPlayer.app/embedded.mobileprovision
 
-NAME=BLOFY-PLAYER-iOS-0.3.1-unsigned.ipa
+NAME=BLOFY-PLAYER-iOS-0.3.3-unsigned.ipa
 (cd build/package && /usr/bin/ditto -c -k --keepParent Payload "../../dist/$NAME")
 shasum -a 256 "dist/$NAME" > dist/SHA256SUMS.txt
 file "$APP/BlofyPlayer" | tee dist/BINARY_INFO.txt
