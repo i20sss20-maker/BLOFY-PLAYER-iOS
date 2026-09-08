@@ -127,17 +127,32 @@ extension View {
     func blofyPanel(radius: CGFloat = 20) -> some View { modifier(BlofyPanel(radius: radius)) }
 }
 
+struct BlofyLogoGlyph: View {
+    var size: CGFloat = 58
+    var body: some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: size * 0.24, style: .continuous)
+                .fill(LinearGradient(colors: [BlofyTheme.purpleBright, BlofyTheme.purple, BlofyTheme.purpleDeep], startPoint: .topLeading, endPoint: .bottomTrailing))
+            Circle()
+                .fill(Color.white.opacity(0.13))
+                .frame(width: size * 0.72, height: size * 0.72)
+            Image(systemName: "play.fill")
+                .font(.system(size: size * 0.36, weight: .black))
+                .foregroundStyle(.white)
+                .offset(x: size * 0.035)
+        }
+        .frame(width: size, height: size)
+        .overlay(RoundedRectangle(cornerRadius: size * 0.24).stroke(Color.white.opacity(0.16), lineWidth: 1))
+        .shadow(color: BlofyTheme.purple.opacity(0.30), radius: size * 0.25, y: size * 0.10)
+        .accessibilityLabel("BLOFY PLAYER")
+    }
+}
+
 struct BlofyBrandMark: View {
     var compact = false
     var body: some View {
         HStack(spacing: compact ? 7 : 10) {
-            Image("blofy_logo")
-                .resizable().scaledToFit()
-                .frame(width: compact ? 38 : 58, height: compact ? 38 : 58)
-                .clipShape(RoundedRectangle(cornerRadius: compact ? 9 : 13, style: .continuous))
-                .overlay(RoundedRectangle(cornerRadius: compact ? 9 : 13).stroke(Color.white.opacity(0.08)))
-                .shadow(color: BlofyTheme.purple.opacity(compact ? 0.16 : 0.26), radius: compact ? 8 : 15, y: 5)
-
+            BlofyLogoGlyph(size: compact ? 38 : 58)
             if !compact {
                 VStack(alignment: .leading, spacing: 1) {
                     Text("BLOFY PLAYER")
