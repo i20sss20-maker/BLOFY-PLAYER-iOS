@@ -60,10 +60,7 @@ private struct EntrySplashView: View {
                 .animation(.easeInOut(duration: 1.5).repeatForever(autoreverses: true), value: glow)
             VStack(spacing: 22) {
                 Spacer()
-                Image("blofy_logo")
-                    .resizable().scaledToFit().frame(width: 104, height: 104)
-                    .clipShape(RoundedRectangle(cornerRadius: 25, style: .continuous))
-                    .shadow(color: BlofyTheme.purple.opacity(0.35), radius: 30, y: 12)
+                BlofyLogoGlyph(size: 104)
                 VStack(spacing: 7) {
                     Text("BLOFY PLAYER").font(.system(size: 23, weight: .black, design: .rounded)).tracking(1.5).foregroundStyle(BlofyTheme.textPrimary)
                     Text("كل ترفيهك في مكان واحد").font(.caption).foregroundStyle(BlofyTheme.textMuted)
