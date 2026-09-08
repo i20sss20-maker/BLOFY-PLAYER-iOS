@@ -51,7 +51,25 @@ struct CatalogView: View {
 
                 if !model.error.isEmpty { Text(model.error).font(.caption).foregroundStyle(BlofyTheme.error).padding(.horizontal) }
 
-                if kind == .live {
+                if shown.isEmpty && !model.loading {
+                    VStack(spacing: 12) {
+                        Spacer()
+                        Image(systemName: query.isEmpty ? "rectangle.stack.badge.minus" : "magnifyingglass")
+                            .font(.system(size: 40, weight: .semibold)).foregroundStyle(BlofyTheme.textMuted)
+                        Text(query.isEmpty ? "ما فيه محتوى في هذه الفئة" : "ما لقينا نتائج")
+                            .font(.headline).foregroundStyle(BlofyTheme.textPrimary)
+                        Text(query.isEmpty ? "جرّب فئة ثانية أو حدّث القوائم." : "جرّب كتابة اسم مختلف أو امسح البحث.")
+                            .font(.caption).foregroundStyle(BlofyTheme.textMuted).multilineTextAlignment(.center)
+                        if query.isEmpty {
+                            Button("تحديث القوائم") { Task { await model.loadCatalog(force: true) } }
+                                .font(.subheadline.bold()).foregroundStyle(.white)
+                                .padding(.horizontal, 16).padding(.vertical, 10)
+                                .background(BlofyTheme.primaryGradient, in: Capsule())
+                        }
+                        Spacer()
+                    }
+                    .padding(.horizontal, 28)
+                } else if kind == .live {
                     ScrollView {
                         LazyVStack(spacing: 8) {
                             ForEach(shown) { item in
@@ -112,6 +130,7 @@ struct DetailsView: View {
     @State var item: MediaItem
     @State private var play: PlaybackSession?
     @State private var loadingDetail = false
+    @State private var preparingPlayback = false
 
     private var resumeEntry: ResumeEntry? { model.resume[item.id] }
     private var resumeProgress: Double {
@@ -143,7 +162,12 @@ struct DetailsView: View {
                 }
                 .clipShape(RoundedRectangle(cornerRadius: 26, style: .continuous))
 
-                if loadingDetail { ProgressView().tint(BlofyTheme.purpleBright) }
+                if loadingDetail {
+                    HStack(spacing: 9) {
+                        ProgressView().tint(BlofyTheme.purpleBright)
+                        Text("جاري تحميل تفاصيل الفيلم…").font(.caption).foregroundStyle(BlofyTheme.textMuted)
+                    }
+                }
 
                 if let r = resumeEntry, r.duration > 0 {
                     VStack(alignment: .leading, spacing: 7) {
@@ -161,11 +185,16 @@ struct DetailsView: View {
                 }
 
                 HStack(spacing: 11) {
-                    Button { start() } label: {
-                        Label(resumeEntry == nil ? "تشغيل الآن" : "استئناف", systemImage: resumeEntry == nil ? "play.fill" : "arrow.clockwise")
-                            .font(.headline).frame(maxWidth: .infinity).padding(.vertical, 14)
-                            .background(BlofyTheme.primaryGradient, in: RoundedRectangle(cornerRadius: 17, style: .continuous))
-                    }.buttonStyle(.plain).foregroundStyle(.white)
+                    Button { Task { await start() } } label: {
+                        HStack(spacing: 9) {
+                            if preparingPlayback { ProgressView().tint(.white) }
+                            else { Image(systemName: resumeEntry == nil ? "play.fill" : "arrow.clockwise") }
+                            Text(preparingPlayback ? "جاري تجهيز التشغيل…" : (resumeEntry == nil ? "تشغيل الآن" : "استئناف"))
+                        }
+                        .font(.headline).frame(maxWidth: .infinity).padding(.vertical, 14)
+                        .background(BlofyTheme.primaryGradient, in: RoundedRectangle(cornerRadius: 17, style: .continuous))
+                    }
+                    .buttonStyle(.plain).foregroundStyle(.white).disabled(preparingPlayback)
                     Button { model.toggleFavorite(item) } label: {
                         Image(systemName: model.favorites.contains(item.id) ? "heart.fill" : "heart")
                             .font(.headline).frame(width: 52, height: 52)
@@ -185,7 +214,17 @@ struct DetailsView: View {
         .fullScreenCover(item: $play) { PlayerScreen(session: $0) }
     }
 
-    private func start() {
+    @MainActor
+    private func start() async {
+        guard !preparingPlayback else { return }
+        preparingPlayback = true
+        defer { preparingPlayback = false }
+
+        if item.kind == .movie {
+            let detailed = await model.detailedMovie(item)
+            item = detailed
+        }
+
         do { play = try model.makePlaybackSession(for: item) }
         catch { model.error = error.localizedDescription }
     }
@@ -199,6 +238,7 @@ struct SeriesDetailsView: View {
     @State private var error = ""
     @State private var selectedSeason: Int?
     @State private var play: PlaybackSession?
+    @State private var preparingEpisodeID: String?
 
     private var seasons: [Int] { Array(Set(episodes.map { $0.season })).sorted() }
     private var visibleEpisodes: [MediaItem] {
@@ -238,10 +278,12 @@ struct SeriesDetailsView: View {
                                 Text(resumableEpisode == nil ? "ابدأ المشاهدة" : "استئناف المسلسل").font(.headline)
                                 Text("الموسم \(nextEpisode.season) · الحلقة \(nextEpisode.episode)").font(.caption).opacity(0.8)
                             }
-                            Spacer(); Image(systemName: "play.fill")
+                            Spacer()
+                            if preparingEpisodeID == nextEpisode.id { ProgressView().tint(.white) }
+                            else { Image(systemName: "play.fill") }
                         }
                         .padding(15).background(BlofyTheme.primaryGradient, in: RoundedRectangle(cornerRadius: 18, style: .continuous)).foregroundStyle(.white)
-                    }.buttonStyle(.plain)
+                    }.buttonStyle(.plain).disabled(preparingEpisodeID != nil)
                 }
 
                 HStack(spacing: 10) {
@@ -254,6 +296,15 @@ struct SeriesDetailsView: View {
 
                 if loading { ProgressView("تحميل الحلقات…").tint(BlofyTheme.purpleBright) }
                 if !error.isEmpty { Text(error).foregroundStyle(BlofyTheme.error) }
+
+                if !loading && episodes.isEmpty && error.isEmpty {
+                    VStack(spacing: 10) {
+                        Image(systemName: "rectangle.stack.badge.minus").font(.title).foregroundStyle(BlofyTheme.textMuted)
+                        Text("ما لقينا حلقات لهذا المسلسل").font(.headline)
+                        Text("قد يكون السيرفر ما رجع بيانات الحلقات حاليًا.").font(.caption).foregroundStyle(BlofyTheme.textMuted)
+                    }
+                    .frame(maxWidth: .infinity).padding(.vertical, 32).blofyPanel(radius: 18)
+                }
 
                 if !seasons.isEmpty {
                     ScrollView(.horizontal, showsIndicators: false) {
@@ -284,10 +335,12 @@ struct SeriesDetailsView: View {
                                     Text(episode.name).font(.caption).foregroundStyle(BlofyTheme.textMuted).lineLimit(2)
                                     if model.resume[episode.id] != nil { Text("متابعة").font(.caption2.bold()).foregroundStyle(BlofyTheme.mint) }
                                 }
-                                Spacer(); Image(systemName: "play.circle.fill").font(.title3).foregroundStyle(BlofyTheme.purpleSoft)
+                                Spacer()
+                                if preparingEpisodeID == episode.id { ProgressView().tint(BlofyTheme.purpleSoft) }
+                                else { Image(systemName: "play.circle.fill").font(.title3).foregroundStyle(BlofyTheme.purpleSoft) }
                             }
                             .padding(10).blofyPanel(radius: 16)
-                        }.buttonStyle(.plain)
+                        }.buttonStyle(.plain).disabled(preparingEpisodeID != nil)
                     }
                 }
             }.padding(16)
@@ -304,6 +357,9 @@ struct SeriesDetailsView: View {
     }
 
     private func start(_ episode: MediaItem) {
+        guard preparingEpisodeID == nil else { return }
+        preparingEpisodeID = episode.id
+        defer { preparingEpisodeID = nil }
         do { play = try model.makePlaybackSession(for: episode) }
         catch { self.error = error.localizedDescription }
     }
@@ -322,6 +378,21 @@ struct SearchView: View {
                         VStack(alignment: .leading, spacing: 4) { Text(item.name).foregroundStyle(BlofyTheme.textPrimary); Text(item.kind.title).font(.caption).foregroundStyle(BlofyTheme.purpleSoft) }
                     }
                 }.listRowBackground(BlofyTheme.surface.opacity(0.82))
+            }
+            .overlay {
+                if query.isEmpty {
+                    VStack(spacing: 10) {
+                        Image(systemName: "magnifyingglass").font(.system(size: 34)).foregroundStyle(BlofyTheme.textMuted)
+                        Text("ابدأ الكتابة للبحث").font(.headline).foregroundStyle(BlofyTheme.textPrimary)
+                        Text("يظهر البحث من أول حرف في البث والأفلام والمسلسلات.").font(.caption).foregroundStyle(BlofyTheme.textMuted).multilineTextAlignment(.center)
+                    }.padding(.horizontal, 34)
+                } else if results.isEmpty {
+                    VStack(spacing: 10) {
+                        Image(systemName: "magnifyingglass.circle").font(.system(size: 34)).foregroundStyle(BlofyTheme.textMuted)
+                        Text("ما لقينا نتائج").font(.headline).foregroundStyle(BlofyTheme.textPrimary)
+                        Text("جرّب اسمًا مختلفًا.").font(.caption).foregroundStyle(BlofyTheme.textMuted)
+                    }
+                }
             }
             .scrollContentBackground(.hidden).background(BlofyTheme.backgroundGradient).navigationTitle("البحث").searchable(text: $query, prompt: "اكتب من أول حرف")
         }
