@@ -136,7 +136,6 @@ if old not in s:
     raise SystemExit('seek block not found')
 s = s.replace(old, new, 1)
 
-# Commit slider seek once at the end of the drag.
 overlay_anchor = '    let showEngineBadge: Bool\n    let dismiss: DismissAction\n'
 overlay_insert = '''    let showEngineBadge: Bool
     let dismiss: DismissAction
@@ -178,7 +177,10 @@ PY
 
 VLC_ZIP="build/VLCKit.zip"
 VLC_URL="https://download.videolan.org/cocoapods/unstable/VLCKit-4.0-20260805-1123.zip"
-curl -fL --retry 3 --retry-delay 2 "$VLC_URL" -o "$VLC_ZIP"
+if [[ ! -s "$VLC_ZIP" ]]; then
+  curl -fL --retry 3 --retry-delay 2 "$VLC_URL" -o "$VLC_ZIP"
+fi
+/usr/bin/unzip -tq "$VLC_ZIP" >/dev/null
 rm -rf build/vlckit-unpack && mkdir -p build/vlckit-unpack
 /usr/bin/unzip -q "$VLC_ZIP" -d build/vlckit-unpack
 VLC_XCFRAMEWORK="$(find build/vlckit-unpack -name 'VLCKit.xcframework' -type d | head -n 1)"
