@@ -41,13 +41,20 @@ extension AppModel {
                     let oldID = merged[match].id
                     var updated = provider
                     updated.id = oldID
+                    // The portal has no playback-format setting; retain the user's local choice.
+                    updated.liveFormat = merged[match].liveFormat
                     merged[match] = updated
                 } else {
                     merged.append(provider)
                 }
             }
             playlists = merged
-            if selected == nil { selected = merged.first }
+            if let selectedID = selected?.id,
+               let updated = merged.first(where: { $0.id == selectedID }) {
+                updateSelectedPlaylist(updated)
+            } else if selected == nil {
+                selected = merged.first
+            }
             savePlaylists()
         } catch {
             // Keep local playlists usable when the portal has a temporary outage.
