@@ -40,7 +40,7 @@ target.build_configurations.each do |c|
     'CODE_SIGNING_REQUIRED'=>'NO',
     'CODE_SIGN_IDENTITY'=>'',
     'DEVELOPMENT_TEAM'=>'',
-    'MARKETING_VERSION'=>'0.3.3',
+    'MARKETING_VERSION'=>'0.3.4',
     'CURRENT_PROJECT_VERSION'=>ENV.fetch('BLOFY_IOS_BUILD_NUMBER','1'),
     'FRAMEWORK_SEARCH_PATHS'=>['$(inherited)','$(PROJECT_DIR)/Vendor']
   })
