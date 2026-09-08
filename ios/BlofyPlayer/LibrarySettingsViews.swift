@@ -17,37 +17,26 @@ struct LibraryView: View {
 
     var body: some View {
         NavigationStack {
-            ScrollView {
+            ScrollView(showsIndicators: false) {
                 LazyVStack(alignment: .leading, spacing: 22) {
                     HStack {
-                        BlofyBrandMark()
-                        Spacer()
-                        VStack(alignment: .trailing, spacing: 2) {
-                            Text("مكتبتي").font(.title2.bold())
-                            Text("\(favoriteItems.count) مفضلة · \(resumeEntries.count) متابعة")
-                                .font(.caption2).foregroundStyle(BlofyTheme.textMuted)
+                        BlofyBrandMark(compact: true)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("مكتبتي").font(.title2.black())
+                            Text("محفوظاتك ومتابعة المشاهدة").font(.caption2).foregroundStyle(BlofyTheme.textMuted)
                         }
+                        Spacer()
                     }
                     .padding(.horizontal, 16).padding(.top, 8)
 
-                    if let latest = resumeEntries.first {
-                        LibraryHero(entry: latest)
-                            .padding(.horizontal, 16)
-                            .transition(.opacity.combined(with: .move(edge: .top)))
-                    }
+                    if let latest = resumeEntries.first { LibraryHero(entry: latest).padding(.horizontal, 16) }
 
                     if !resumeEntries.isEmpty {
                         VStack(alignment: .leading, spacing: 10) {
-                            HStack {
-                                Text("متابعة المشاهدة").font(.headline.bold())
-                                Spacer()
-                                Text("\(resumeEntries.count)").font(.caption2).foregroundStyle(BlofyTheme.textMuted)
-                            }.padding(.horizontal, 16)
+                            Text("متابعة المشاهدة").font(.headline.bold()).padding(.horizontal, 16)
                             ScrollView(.horizontal, showsIndicators: false) {
                                 HStack(spacing: 12) {
-                                    ForEach(resumeEntries, id: \.item.id) { entry in
-                                        ResumeLibraryCard(entry: entry)
-                                    }
+                                    ForEach(resumeEntries, id: \.item.id) { ResumeLibraryCard(entry: $0) }
                                 }.padding(.horizontal, 16)
                             }
                         }
@@ -58,41 +47,32 @@ struct LibraryView: View {
                             Text("المفضلة").font(.headline.bold())
                             Spacer()
                             Menu {
-                                Button("الكل") { withAnimation(.easeInOut(duration: 0.18)) { filter = "all" } }
-                                Button("البث") { withAnimation(.easeInOut(duration: 0.18)) { filter = "live" } }
-                                Button("الأفلام") { withAnimation(.easeInOut(duration: 0.18)) { filter = "movie" } }
-                                Button("المسلسلات") { withAnimation(.easeInOut(duration: 0.18)) { filter = "series" } }
+                                Button("الكل") { filter = "all" }
+                                Button("البث") { filter = "live" }
+                                Button("الأفلام") { filter = "movie" }
+                                Button("المسلسلات") { filter = "series" }
                             } label: {
                                 Label(filterTitle, systemImage: "line.3.horizontal.decrease.circle.fill")
-                                    .font(.caption.bold())
-                                    .padding(.horizontal, 11).padding(.vertical, 7)
+                                    .font(.caption.bold()).padding(.horizontal, 11).padding(.vertical, 7)
                                     .background(BlofyTheme.surfaceRaised, in: Capsule())
-                            }
-                            .foregroundStyle(BlofyTheme.textPrimary)
+                            }.foregroundStyle(BlofyTheme.textPrimary)
                         }.padding(.horizontal, 16)
 
                         if filteredFavorites.isEmpty {
                             VStack(spacing: 12) {
-                                Image(systemName: "heart.slash").font(.system(size: 42)).foregroundStyle(BlofyTheme.textMuted)
-                                Text("ما فيه عناصر هنا").font(.headline)
-                                Text("أضف قناة أو فيلم أو مسلسل للمفضلة، وبتلقاه هنا مباشرة.")
-                                    .font(.caption).multilineTextAlignment(.center).foregroundStyle(BlofyTheme.textMuted)
-                            }
-                            .frame(maxWidth: .infinity).padding(.vertical, 44).blofyPanel(radius: 22).padding(.horizontal, 16)
-                            .transition(.opacity)
+                                Image(systemName: "heart.slash").font(.system(size: 40)).foregroundStyle(BlofyTheme.textMuted)
+                                Text("المفضلة فارغة").font(.headline)
+                                Text("أضف ما يعجبك وبتلقاه هنا مباشرة.").font(.caption).foregroundStyle(BlofyTheme.textMuted)
+                            }.frame(maxWidth: .infinity).padding(.vertical, 40).blofyPanel(radius: 22).padding(.horizontal, 16)
                         } else {
                             LazyVGrid(columns: [GridItem(.adaptive(minimum: 132), spacing: 12)], spacing: 14) {
-                                ForEach(filteredFavorites) { item in
-                                    LibraryFavoriteCard(item: item)
-                                        .transition(.scale(scale: 0.96).combined(with: .opacity))
-                                }
+                                ForEach(filteredFavorites) { LibraryFavoriteCard(item: $0) }
                             }.padding(.horizontal, 16)
                         }
                     }
                 }.padding(.bottom, 34)
             }
-            .background(BlofyTheme.backgroundGradient)
-            .toolbar(.hidden, for: .navigationBar)
+            .background(BlofyTheme.backgroundGradient).toolbar(.hidden, for: .navigationBar)
         }
     }
 
@@ -105,17 +85,12 @@ private struct LibraryHero: View {
     @EnvironmentObject var model: AppModel
     let entry: ResumeEntry
     @State private var play: PlaybackSession?
-
-    private var progress: Double {
-        guard entry.duration > 0 else { return 0 }
-        return min(max(entry.seconds / entry.duration, 0), 1)
-    }
+    private var progress: Double { entry.duration > 0 ? min(max(entry.seconds / entry.duration, 0), 1) : 0 }
 
     var body: some View {
         ZStack(alignment: .bottomLeading) {
-            Poster(url: entry.item.poster)
-                .frame(maxWidth: .infinity).frame(height: 190).clipped()
-            LinearGradient(colors: [.clear, .black.opacity(0.9)], startPoint: .top, endPoint: .bottom)
+            Poster(url: entry.item.poster).frame(maxWidth: .infinity).frame(height: 190).clipped()
+            LinearGradient(colors: [.clear, .black.opacity(0.92)], startPoint: .top, endPoint: .bottom)
             VStack(alignment: .leading, spacing: 8) {
                 Text("آخر مشاهدة").font(.caption.bold()).foregroundStyle(BlofyTheme.mint)
                 Text(entry.item.name).font(.title3.bold()).lineLimit(2)
@@ -126,15 +101,13 @@ private struct LibraryHero: View {
                     Button {
                         if let session = try? model.makePlaybackSession(for: entry.item) { play = session }
                     } label: {
-                        Label("استئناف", systemImage: "play.fill").font(.subheadline.bold())
-                            .padding(.horizontal, 14).padding(.vertical, 9).background(.white, in: Capsule()).foregroundStyle(.black)
+                        Label("استئناف", systemImage: "play.fill").font(.subheadline.bold()).padding(.horizontal, 14).padding(.vertical, 9).background(.white, in: Capsule()).foregroundStyle(.black)
                     }.buttonStyle(.plain)
                 }
             }.padding(16)
         }
-        .frame(height: 190)
-        .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 24).stroke(BlofyTheme.divider))
+        .frame(height: 190).clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 24).stroke(Color.white.opacity(0.06)))
         .fullScreenCover(item: $play) { PlayerScreen(session: $0) }
     }
 }
@@ -144,7 +117,6 @@ private struct ResumeLibraryCard: View {
     let entry: ResumeEntry
     @State private var play: PlaybackSession?
     private var progress: Double { entry.duration > 0 ? min(max(entry.seconds / entry.duration, 0), 1) : 0 }
-
     var body: some View {
         Button {
             if let session = try? model.makePlaybackSession(for: entry.item) { play = session }
@@ -165,14 +137,12 @@ private struct LibraryFavoriteCard: View {
     @EnvironmentObject var model: AppModel
     let item: MediaItem
     @State private var play: PlaybackSession?
-
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             ZStack(alignment: .topTrailing) {
                 Poster(url: item.poster).aspectRatio(0.72, contentMode: .fill).frame(maxWidth: .infinity).clipShape(RoundedRectangle(cornerRadius: 16))
                 Button { model.toggleFavorite(item) } label: {
-                    Image(systemName: "heart.fill").font(.caption.bold()).frame(width: 32, height: 32)
-                        .background(.black.opacity(0.7), in: Circle()).foregroundStyle(BlofyTheme.purpleSoft)
+                    Image(systemName: "heart.fill").font(.caption.bold()).frame(width: 32, height: 32).background(.black.opacity(0.7), in: Circle()).foregroundStyle(BlofyTheme.purpleSoft)
                 }.buttonStyle(.plain).padding(7)
             }
             Text(item.name).font(.caption.bold()).foregroundStyle(BlofyTheme.textPrimary).lineLimit(2)
@@ -180,11 +150,12 @@ private struct LibraryFavoriteCard: View {
             if item.kind != .series {
                 Button {
                     if let session = try? model.makePlaybackSession(for: item) { play = session }
-                } label: { Label("تشغيل", systemImage: "play.fill").font(.caption.bold()).frame(maxWidth: .infinity).padding(.vertical, 8).background(BlofyTheme.primaryGradient, in: RoundedRectangle(cornerRadius: 10)).foregroundStyle(.white) }
-                    .buttonStyle(.plain)
+                } label: {
+                    Label("تشغيل", systemImage: "play.fill").font(.caption.bold()).frame(maxWidth: .infinity).padding(.vertical, 8).background(BlofyTheme.primaryGradient, in: RoundedRectangle(cornerRadius: 10)).foregroundStyle(.white)
+                }.buttonStyle(.plain)
             }
         }
-        .padding(10).background(BlofyTheme.surface.opacity(0.9), in: RoundedRectangle(cornerRadius: 18)).overlay(RoundedRectangle(cornerRadius: 18).stroke(BlofyTheme.divider))
+        .padding(10).blofyPanel(radius: 18)
         .fullScreenCover(item: $play) { PlayerScreen(session: $0) }
     }
 }
@@ -192,6 +163,7 @@ private struct LibraryFavoriteCard: View {
 struct SettingsView: View {
     @EnvironmentObject var model: AppModel
     @Binding var showAdd: Bool
+    @AppStorage("blofyThemeStyle") private var themeStyle = "signature"
 
     private var versionLabel: String {
         let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "—"
@@ -201,23 +173,50 @@ struct SettingsView: View {
 
     var body: some View {
         NavigationStack {
-            ScrollView {
+            ScrollView(showsIndicators: false) {
                 VStack(spacing: 16) {
-                    HStack { BlofyBrandMark(); Spacer(); Text("الإعدادات").font(.title2.bold()) }
-                        .padding(.horizontal, 16).padding(.top, 8)
+                    settingsHeader
 
-                    SettingsCard(title: "القوائم", icon: "server.rack") {
+                    SettingsCard(title: "التجربة", subtitle: "اضبط التطبيق بالطريقة اللي تناسبك", icon: "sparkles") {
+                        SettingToggleRow(title: "شعارات القنوات", subtitle: "إظهار شعار القناة في القوائم", icon: "photo", isOn: $model.showChannelLogos)
+                        Divider().overlay(BlofyTheme.divider)
+                        SettingToggleRow(title: "التقييمات", subtitle: "إظهار تقييم المحتوى إذا كان متوفر", icon: "star.fill", isOn: $model.showRatings)
+                        Divider().overlay(BlofyTheme.divider)
+                        SettingToggleRow(title: "التشغيل التلقائي للبث", subtitle: "ابدأ القناة بسرعة عند الدخول", icon: "bolt.fill", isOn: $model.autoPlayLive)
+                        Divider().overlay(BlofyTheme.divider)
+                        SettingToggleRow(title: "الاهتزازات", subtitle: "ردود فعل خفيفة أثناء الاستخدام", icon: "iphone.radiowaves.left.and.right", isOn: $model.hapticsEnabled)
+                    }
+
+                    SettingsCard(title: "مظهر BLOFY", subtitle: "كلها بنفس الهوية، باختلاف الجو العام", icon: "paintpalette.fill") {
+                        Picker("الثيم", selection: $themeStyle) {
+                            Text("BLOFY").tag("signature")
+                            Text("Midnight").tag("midnight")
+                            Text("Graphite").tag("graphite")
+                        }.pickerStyle(.segmented)
+                        HStack(spacing: 8) {
+                            ThemeDot(style: "signature", selected: themeStyle == "signature")
+                            ThemeDot(style: "midnight", selected: themeStyle == "midnight")
+                            ThemeDot(style: "graphite", selected: themeStyle == "graphite")
+                        }
+                    }
+
+                    SettingsCard(title: "المشاهدة", subtitle: "الصوت والترجمة والصورة", icon: "play.rectangle.fill") {
+                        SettingsLink(title: "تفضيلات المشاهدة", subtitle: "الصوت · الترجمة · حجم الترجمة · العرض", icon: "slider.horizontal.3") {
+                            PlayerAdvancedSettingsView()
+                        }
+                    }
+
+                    SettingsCard(title: "القوائم والسيرفرات", subtitle: "إدارة المحتوى المرتبط بجهازك", icon: "server.rack") {
                         ForEach(model.playlists) { playlist in
                             Button {
                                 model.choose(playlist)
                                 Task { await model.loadCatalog() }
                             } label: {
                                 HStack(spacing: 12) {
-                                    Image(systemName: playlist.type == "m3u" ? "list.bullet.rectangle" : "server.rack")
-                                        .foregroundStyle(BlofyTheme.purpleSoft).frame(width: 28)
+                                    Image(systemName: "server.rack").foregroundStyle(BlofyTheme.purpleSoft).frame(width: 28)
                                     VStack(alignment: .leading, spacing: 2) {
                                         Text(playlist.name).foregroundStyle(BlofyTheme.textPrimary)
-                                        Text(playlist.type.uppercased()).font(.caption2).foregroundStyle(BlofyTheme.textMuted)
+                                        Text(model.selected?.id == playlist.id ? "متصل الآن" : "جاهز للتبديل").font(.caption2).foregroundStyle(model.selected?.id == playlist.id ? BlofyTheme.mint : BlofyTheme.textMuted)
                                     }
                                     Spacer()
                                     if model.selected?.id == playlist.id { Image(systemName: "checkmark.circle.fill").foregroundStyle(BlofyTheme.mint) }
@@ -226,127 +225,147 @@ struct SettingsView: View {
                             Divider().overlay(BlofyTheme.divider)
                         }
                         HStack(spacing: 10) {
-                            Button { showAdd = true } label: { Label("إضافة قائمة", systemImage: "plus") }.blofyAction(primary: true)
-                            Button { Task { await model.loadCatalog(force: true) } } label: { Label("تحديث", systemImage: "arrow.clockwise") }.blofyAction()
+                            Button { showAdd = true } label: { Label("إضافة", systemImage: "plus") }.blofyAction(primary: true)
+                            Button { Task { await model.loadCatalog(force: true) } } label: { Label("تحديث المحتوى", systemImage: "arrow.clockwise") }.blofyAction()
                         }
                     }
 
-                    SettingsCard(title: "التشغيل", icon: "play.rectangle.fill") {
-                        SettingPickerRow(title: "المحرك", subtitle: "اختيار المحرك المناسب تلقائيًا أو يدويًا") {
-                            Picker("المحرك", selection: $model.preferredEngine) {
-                                Text("تلقائي").tag("auto")
-                                Text("Apple").tag("apple")
-                                Text("VLC").tag("vlc")
-                            }.pickerStyle(.segmented)
-                        }
-                        Divider().overlay(BlofyTheme.divider)
-                        SettingPickerRow(title: "البافر", subtitle: "سريع للقنوات أو مستقر للاتصالات الضعيفة") {
-                            Picker("البافر", selection: $model.bufferProfile) {
-                                Text("سريع").tag("fast")
-                                Text("متوازن").tag("balanced")
-                                Text("مستقر").tag("stable")
-                            }.pickerStyle(.segmented)
-                        }
-                        Divider().overlay(BlofyTheme.divider)
-                        SettingPickerRow(title: "صيغة البث", subtitle: "TS أو HLS حسب السيرفر") {
-                            Picker("صيغة البث", selection: $model.liveFormat) {
-                                Text("TS").tag("ts")
-                                Text("HLS").tag("m3u8")
-                            }.pickerStyle(.segmented)
-                        }
-                        .onChange(of: model.liveFormat) { model.setLiveFormat($0) }
-                        Divider().overlay(BlofyTheme.divider)
-                        SettingToggleRow(title: "تشغيل البث تلقائيًا", icon: "bolt.fill", isOn: $model.autoPlayLive)
-                        Divider().overlay(BlofyTheme.divider)
-                        NavigationLink {
-                            PlayerAdvancedSettingsView()
-                        } label: {
-                            HStack(spacing: 12) {
-                                Image(systemName: "slider.horizontal.3").foregroundStyle(BlofyTheme.purpleBright).frame(width: 30)
-                                VStack(alignment: .leading, spacing: 3) {
-                                    Text("إعدادات المشغل المتقدمة").font(.subheadline.bold()).foregroundStyle(BlofyTheme.textPrimary)
-                                    Text("الصوت · الترجمة · السرعة · نسبة العرض").font(.caption2).foregroundStyle(BlofyTheme.textMuted)
-                                }
-                                Spacer()
-                                Image(systemName: "chevron.left").font(.caption.bold()).foregroundStyle(BlofyTheme.textMuted)
-                            }.contentShape(Rectangle())
-                        }.buttonStyle(.plain)
-                    }
-
-                    SettingsCard(title: "المظهر والتجربة", icon: "sparkles") {
-                        SettingToggleRow(title: "إظهار شعارات القنوات", icon: "photo", isOn: $model.showChannelLogos)
-                        Divider().overlay(BlofyTheme.divider)
-                        SettingToggleRow(title: "إظهار التقييمات", icon: "star.fill", isOn: $model.showRatings)
-                        Divider().overlay(BlofyTheme.divider)
-                        SettingToggleRow(title: "الاهتزازات اللمسية", icon: "iphone.radiowaves.left.and.right", isOn: $model.hapticsEnabled)
-                    }
-
-                    SettingsCard(title: "اللغة", icon: "globe") {
+                    SettingsCard(title: "اللغة", subtitle: "لغة واجهة التطبيق", icon: "globe") {
                         Picker("لغة التطبيق", selection: $model.language) {
                             Text("العربية").tag("ar")
                             Text("English").tag("en")
                         }.pickerStyle(.segmented)
                     }
 
-                    SettingsCard(title: "الجهاز والتفعيل", icon: "qrcode") {
-                        SettingValueRow(title: "Device ID", value: model.deviceID)
+                    SettingsCard(title: "متقدم", subtitle: "خيارات لا تحتاج تغيرها غالبًا", icon: "gearshape.2.fill") {
+                        SettingsLink(title: "إعدادات الاتصال والتشغيل", subtitle: "للمستخدم المتقدم فقط", icon: "wrench.and.screwdriver.fill") {
+                            TechnicalPlaybackSettingsView()
+                        }
+                    }
+
+                    SettingsCard(title: "الجهاز", subtitle: "بيانات جهاز BLOFY", icon: "qrcode") {
+                        SettingValueRow(title: "رقم الجهاز", value: model.deviceID)
                         Divider().overlay(BlofyTheme.divider)
-                        SettingValueRow(title: "Code", value: model.activationCode)
+                        SettingValueRow(title: "رمز الدخول", value: model.activationCode)
                         if !model.activationStatus.isEmpty {
                             Divider().overlay(BlofyTheme.divider)
                             SettingValueRow(title: "الحالة", value: model.activationStatus)
                         }
                     }
 
-                    SettingsCard(title: "حول BLOFY", icon: "info.circle.fill") {
-                        SettingValueRow(title: "النسخة", value: versionLabel)
-                        Text("محرك هجين Apple + VLC، بث سريع، EPG، مفضلة، متابعة مشاهدة، صوت وترجمة وتحكم متقدم.")
-                            .font(.caption).foregroundStyle(BlofyTheme.textMuted).frame(maxWidth: .infinity, alignment: .leading)
+                    SettingsCard(title: "حول BLOFY", subtitle: "BLOFY PLAYER", icon: "info.circle.fill") {
+                        SettingValueRow(title: "الإصدار", value: versionLabel)
+                        Text("BLOFY PLAYER مصمم لتجربة مشاهدة بسيطة وسريعة، بدون إظهار التفاصيل التقنية للمستخدم إلا عند الحاجة.")
+                            .font(.caption).foregroundStyle(BlofyTheme.textMuted)
                     }
-                }
-                .padding(.bottom, 32)
+                }.padding(.bottom, 32)
             }
-            .background(BlofyTheme.backgroundGradient)
-            .toolbar(.hidden, for: .navigationBar)
+            .background(BlofyTheme.backgroundGradient).toolbar(.hidden, for: .navigationBar)
             .onDisappear { model.saveSettings() }
         }
+    }
+
+    private var settingsHeader: some View {
+        HStack(spacing: 12) {
+            BlofyBrandMark(compact: true)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("الإعدادات").font(.title2.black())
+                Text("كل شيء في مكان واضح").font(.caption2).foregroundStyle(BlofyTheme.textMuted)
+            }
+            Spacer()
+        }.padding(.horizontal, 16).padding(.top, 8)
+    }
+}
+
+struct TechnicalPlaybackSettingsView: View {
+    @EnvironmentObject var model: AppModel
+    var body: some View {
+        ScrollView(showsIndicators: false) {
+            VStack(spacing: 16) {
+                SettingsCard(title: "المحرك", subtitle: "اتركه تلقائيًا إلا إذا كنت تعرف المطلوب", icon: "cpu") {
+                    Picker("المحرك", selection: $model.preferredEngine) {
+                        Text("تلقائي").tag("auto")
+                        Text("Apple").tag("apple")
+                        Text("VLC").tag("vlc")
+                    }.pickerStyle(.segmented)
+                }
+                SettingsCard(title: "استقرار التشغيل", subtitle: "اختر حسب سرعة واتصال السيرفر", icon: "waveform.path.ecg") {
+                    Picker("البافر", selection: $model.bufferProfile) {
+                        Text("سريع").tag("fast")
+                        Text("متوازن").tag("balanced")
+                        Text("مستقر").tag("stable")
+                    }.pickerStyle(.segmented)
+                }
+                SettingsCard(title: "صيغة البث", subtitle: "لا تغيرها إلا إذا كان السيرفر يتطلب ذلك", icon: "antenna.radiowaves.left.and.right") {
+                    Picker("صيغة البث", selection: $model.liveFormat) {
+                        Text("TS").tag("ts")
+                        Text("HLS").tag("m3u8")
+                    }.pickerStyle(.segmented)
+                    .onChange(of: model.liveFormat) { model.setLiveFormat($0) }
+                }
+            }.padding(.vertical, 16)
+        }
+        .background(BlofyTheme.backgroundGradient.ignoresSafeArea())
+        .navigationTitle("متقدم")
+        .navigationBarTitleDisplayMode(.inline)
+        .onDisappear { model.saveSettings() }
     }
 }
 
 private struct SettingsCard<Content: View>: View {
     let title: String
+    let subtitle: String
     let icon: String
     @ViewBuilder var content: Content
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            Label(title, systemImage: icon).font(.headline).foregroundStyle(BlofyTheme.textPrimary)
+            HStack(spacing: 11) {
+                Image(systemName: icon).font(.headline).foregroundStyle(BlofyTheme.purpleBright).frame(width: 30, height: 30).background(BlofyTheme.purple.opacity(0.12), in: RoundedRectangle(cornerRadius: 9))
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(title).font(.headline).foregroundStyle(BlofyTheme.textPrimary)
+                    Text(subtitle).font(.caption2).foregroundStyle(BlofyTheme.textMuted)
+                }
+            }
             content
-        }
-        .padding(16).blofyPanel(radius: 22).padding(.horizontal, 16)
+        }.padding(16).blofyPanel(radius: 22).padding(.horizontal, 16)
     }
 }
 
 private struct SettingToggleRow: View {
     let title: String
+    let subtitle: String
     let icon: String
     @Binding var isOn: Bool
     var body: some View {
         Toggle(isOn: $isOn) {
-            Label(title, systemImage: icon).foregroundStyle(BlofyTheme.textSecondary)
+            HStack(spacing: 11) {
+                Image(systemName: icon).frame(width: 26).foregroundStyle(BlofyTheme.purpleSoft)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(title).font(.subheadline.bold()).foregroundStyle(BlofyTheme.textPrimary)
+                    Text(subtitle).font(.caption2).foregroundStyle(BlofyTheme.textMuted)
+                }
+            }
         }.tint(BlofyTheme.purpleBright)
     }
 }
 
-private struct SettingPickerRow<Content: View>: View {
+private struct SettingsLink<Destination: View>: View {
     let title: String
     let subtitle: String
-    @ViewBuilder var content: Content
+    let icon: String
+    @ViewBuilder let destination: Destination
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text(title).font(.subheadline.bold()).foregroundStyle(BlofyTheme.textPrimary)
-            Text(subtitle).font(.caption2).foregroundStyle(BlofyTheme.textMuted)
-            content
-        }
+        NavigationLink { destination } label: {
+            HStack(spacing: 12) {
+                Image(systemName: icon).foregroundStyle(BlofyTheme.purpleBright).frame(width: 30)
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(title).font(.subheadline.bold()).foregroundStyle(BlofyTheme.textPrimary)
+                    Text(subtitle).font(.caption2).foregroundStyle(BlofyTheme.textMuted)
+                }
+                Spacer()
+                Image(systemName: "chevron.left").font(.caption.bold()).foregroundStyle(BlofyTheme.textMuted)
+            }.contentShape(Rectangle())
+        }.buttonStyle(.plain)
     }
 }
 
@@ -355,6 +374,26 @@ private struct SettingValueRow: View {
     let value: String
     var body: some View {
         HStack { Text(title).foregroundStyle(BlofyTheme.textSecondary); Spacer(); Text(value).font(.caption.monospaced()).foregroundStyle(BlofyTheme.purpleSoft).lineLimit(1) }
+    }
+}
+
+private struct ThemeDot: View {
+    let style: String
+    let selected: Bool
+    var body: some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: 13).fill(themeGradient).frame(height: 54)
+            if selected { Image(systemName: "checkmark.circle.fill").foregroundStyle(.white).shadow(radius: 3) }
+        }
+        .overlay(RoundedRectangle(cornerRadius: 13).stroke(selected ? Color.white.opacity(0.55) : Color.white.opacity(0.08), lineWidth: selected ? 1.5 : 1))
+        .frame(maxWidth: .infinity)
+    }
+    private var themeGradient: LinearGradient {
+        switch style {
+        case "midnight": return LinearGradient(colors: [Color(red: 8/255, green: 17/255, blue: 34/255), Color(red: 112/255, green: 94/255, blue: 238/255)], startPoint: .topLeading, endPoint: .bottomTrailing)
+        case "graphite": return LinearGradient(colors: [Color(red: 24/255, green: 24/255, blue: 29/255), Color(red: 142/255, green: 108/255, blue: 201/255)], startPoint: .topLeading, endPoint: .bottomTrailing)
+        default: return LinearGradient(colors: [Color(red: 18/255, green: 11/255, blue: 28/255), Color(red: 174/255, green: 105/255, blue: 255/255)], startPoint: .topLeading, endPoint: .bottomTrailing)
+        }
     }
 }
 
@@ -379,12 +418,15 @@ struct AddPlaylistView: View {
             Form {
                 Section { HStack { Spacer(); BlofyBrandMark(); Spacer() }.padding(.vertical, 8) }.listRowBackground(BlofyTheme.surface.opacity(0.9))
                 Section("نوع القائمة") {
-                    Picker("النوع", selection: $type) { Text("Xtream Codes").tag("xtream"); Text("M3U / M3U8").tag("m3u") }.pickerStyle(.segmented)
+                    Picker("النوع", selection: $type) { Text("Xtream").tag("xtream"); Text("M3U").tag("m3u") }.pickerStyle(.segmented)
                 }.listRowBackground(BlofyTheme.surface.opacity(0.86))
                 Section("بيانات القائمة") {
                     TextField("اسم القائمة", text: $name)
-                    TextField(type == "xtream" ? "Server URL" : "M3U URL", text: $url).textInputAutocapitalization(.never).keyboardType(.URL)
-                    if type == "xtream" { TextField("Username", text: $user).textInputAutocapitalization(.never); SecureField("Password", text: $pass) }
+                    TextField(type == "xtream" ? "رابط السيرفر" : "رابط القائمة", text: $url).textInputAutocapitalization(.never).keyboardType(.URL)
+                    if type == "xtream" {
+                        TextField("اسم المستخدم", text: $user).textInputAutocapitalization(.never)
+                        SecureField("كلمة المرور", text: $pass)
+                    }
                     if !model.error.isEmpty { Text(model.error).foregroundStyle(BlofyTheme.error) }
                 }.listRowBackground(BlofyTheme.surface.opacity(0.86))
             }
@@ -393,8 +435,10 @@ struct AddPlaylistView: View {
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("إلغاء") { dismiss() }.foregroundStyle(BlofyTheme.textSecondary) }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("حفظ") { model.addPlaylist(name: name, type: type, url: url, username: user, password: pass); if model.error.isEmpty { dismiss(); Task { await model.loadCatalog(force: true) } } }
-                        .foregroundStyle(BlofyTheme.purpleBright).fontWeight(.bold)
+                    Button("حفظ") {
+                        model.addPlaylist(name: name, type: type, url: url, username: user, password: pass)
+                        if model.error.isEmpty { dismiss(); Task { await model.loadCatalog(force: true) } }
+                    }.foregroundStyle(BlofyTheme.purpleBright).fontWeight(.bold)
                 }
             }
         }
