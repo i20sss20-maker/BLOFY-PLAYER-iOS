@@ -21,12 +21,13 @@ p.write_text(s)
 PY
 
 # Some Xtream VOD endpoints start correctly but stop responding after an in-place
-# seek. Patch PlayerBox at build time so seeks are verified and, when necessary,
-# the same source is reopened at the requested position before trying fallback.
+# seek. Make seeks single-shot, verified, and recoverable. The slider only commits
+# one seek when the user releases it instead of flooding VLC with requests while dragging.
 python3 - <<'PY'
 from pathlib import Path
 p = Path('BlofyPlayer/PlayerScreen.swift')
 s = p.read_text()
+
 anchor = '    private var didApplyTrackPreferences = false\n'
 insert = '''    private var didApplyTrackPreferences = false
     private var seekGeneration = 0
@@ -118,6 +119,40 @@ if old not in s:
     raise SystemExit('seek block not found')
 s = s.replace(old, new, 1)
 
+# Commit slider seek once at the end of the drag.
+overlay_anchor = '    let showEngineBadge: Bool\n    let dismiss: DismissAction\n'
+overlay_insert = '''    let showEngineBadge: Bool
+    let dismiss: DismissAction
+    @State private var isScrubbing = false
+    @State private var scrubTarget: Double = 0
+'''
+if overlay_anchor not in s:
+    raise SystemExit('PlayerControlsOverlay anchor not found')
+s = s.replace(overlay_anchor, overlay_insert, 1)
+
+old_slider = '                        Slider(value: Binding(get: { box.current }, set: { box.seek(to: $0) }), in: 0...max(box.duration, 1)).tint(BlofyTheme.purpleBright)\n'
+new_slider = '''                        Slider(
+                            value: Binding(
+                                get: { isScrubbing ? scrubTarget : box.current },
+                                set: { scrubTarget = $0 }
+                            ),
+                            in: 0...max(box.duration, 1),
+                            onEditingChanged: { editing in
+                                if editing {
+                                    isScrubbing = true
+                                    scrubTarget = box.current
+                                } else {
+                                    let target = scrubTarget
+                                    isScrubbing = false
+                                    box.seek(to: target)
+                                }
+                            }
+                        ).tint(BlofyTheme.purpleBright)
+'''
+if old_slider not in s:
+    raise SystemExit('VOD slider anchor not found')
+s = s.replace(old_slider, new_slider, 1)
+
 s = s.replace('''        player.pause(); player.replaceCurrentItem(with: nil); vlcPlayer.stop(); candidates = []; switching = false; isPlaying = false
 ''', '''        player.pause(); player.replaceCurrentItem(with: nil); vlcPlayer.stop(); candidates = []; currentPlaybackURL = nil; switching = false; isPlaying = false
 ''', 1)
@@ -137,12 +172,14 @@ xcodebuild -project BlofyPlayer.xcodeproj -scheme BlofyPlayer -configuration Rel
 APP=build/DerivedData/Build/Products/Release-iphoneos/BlofyPlayer.app
 [[ -d "$APP" && -s "$APP/BlofyPlayer" ]]
 [[ -s "$APP/blofy_logo.png" ]]
+[[ -s "$APP/Frameworks/VLCKit.framework/VLCKit" ]]
 xcrun lipo "$APP/BlofyPlayer" -verify_arch arm64
+xcrun lipo "$APP/Frameworks/VLCKit.framework/VLCKit" -verify_arch arm64
 rm -rf build/package && mkdir -p build/package/Payload
 cp -R "$APP" build/package/Payload/
 rm -rf build/package/Payload/BlofyPlayer.app/_CodeSignature
 rm -f build/package/Payload/BlofyPlayer.app/embedded.mobileprovision
-NAME=BLOFY-PLAYER-iOS-0.2.3-unsigned.ipa
+NAME=BLOFY-PLAYER-iOS-0.3.0-unsigned.ipa
 (cd build/package && /usr/bin/ditto -c -k --keepParent Payload "../../dist/$NAME")
 shasum -a 256 "dist/$NAME" > dist/SHA256SUMS.txt
 file "$APP/BlofyPlayer" | tee dist/BINARY_INFO.txt
