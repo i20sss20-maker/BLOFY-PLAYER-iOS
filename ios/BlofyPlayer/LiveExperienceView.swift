@@ -55,7 +55,7 @@ actor LiveEPGClient {
         guard let url = parts.url else { return [] }
         var request = URLRequest(url: url)
         request.timeoutInterval = 8
-        request.setValue("BLOFY PLAYER/2.0", forHTTPHeaderField: "User-Agent")
+        request.setValue("BLOFY PLAYER/0.3", forHTTPHeaderField: "User-Agent")
         do {
             let (data, response) = try await URLSession.shared.data(for: request)
             guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode),
@@ -94,28 +94,38 @@ struct LiveExperienceView: View {
     @EnvironmentObject var model: AppModel
     @State private var selectedCategory = "all"
     @State private var query = ""
+    @State private var committedQuery = ""
     @State private var selectedID = ""
     @State private var recentIDs: [String] = RecentLiveStore.ids()
     @State private var programs: [LiveProgram] = []
     @State private var play: PlaybackSession?
     @State private var favoritesOnly = false
+    @State private var showCategories = false
+    @State private var searchTask: Task<Void, Never>?
     @StateObject private var preview = LivePreviewController()
 
     private var categories: [MediaCategory] { model.categories.filter { $0.kind == .live } }
     private var allChannels: [MediaItem] { model.items.filter { $0.kind == .live } }
+    private var categoryTitle: String {
+        selectedCategory == "all" ? "كل الفئات" : (categories.first { $0.key == selectedCategory }?.name ?? "الفئة")
+    }
     private var shown: [MediaItem] {
-        allChannels.filter {
+        let q = committedQuery.isEmpty ? "" : normalizedSearch(committedQuery)
+        return allChannels.filter {
             (selectedCategory == "all" || $0.categoryID == selectedCategory) &&
             (!favoritesOnly || model.favorites.contains($0.id)) &&
-            (query.isEmpty || normalizedSearch($0.name).contains(normalizedSearch(query)))
+            (q.isEmpty || normalizedSearch($0.name).contains(q))
         }
     }
     private var selected: MediaItem? { allChannels.first { $0.id == selectedID } ?? shown.first }
-    private var recentChannels: [MediaItem] { recentIDs.compactMap { id in allChannels.first { $0.id == id } } }
+    private var recentChannels: [MediaItem] {
+        let map = Dictionary(uniqueKeysWithValues: allChannels.map { ($0.id, $0) })
+        return recentIDs.compactMap { map[$0] }
+    }
 
     var body: some View {
         NavigationStack {
-            ScrollView {
+            ScrollView(showsIndicators: true) {
                 LazyVStack(alignment: .leading, spacing: 16) {
                     header
 
@@ -145,17 +155,40 @@ struct LiveExperienceView: View {
                     filters
                     channelList
                 }
+                .padding(.bottom, 24)
             }
             .background(BlofyTheme.backgroundGradient)
             .toolbar(.hidden, for: .navigationBar)
             .searchable(text: $query, prompt: "ابحث عن قناة")
             .refreshable { await model.loadCatalog(force: true) }
+            .sheet(isPresented: $showCategories) {
+                LiveCategoryBrowserSheet(categories: categories, selected: $selectedCategory)
+                    .presentationDetents([.medium, .large])
+                    .presentationDragIndicator(.visible)
+            }
+            .onChange(of: query) { newValue in
+                searchTask?.cancel()
+                searchTask = Task {
+                    try? await Task.sleep(nanoseconds: 320_000_000)
+                    guard !Task.isCancelled else { return }
+                    await MainActor.run { committedQuery = newValue }
+                }
+            }
+            .onChange(of: selectedCategory) { _ in
+                selectedID = ""
+                programs = []
+                preview.stop()
+            }
             .onAppear {
                 recentIDs = RecentLiveStore.ids()
+                committedQuery = query
                 if selectedID.isEmpty { selectedID = recentChannels.first?.id ?? allChannels.first?.id ?? "" }
             }
             .onReceive(NotificationCenter.default.publisher(for: .blofyRecentLiveChanged)) { _ in recentIDs = RecentLiveStore.ids() }
-            .onDisappear { preview.stop() }
+            .onDisappear {
+                searchTask?.cancel()
+                preview.stop()
+            }
             .fullScreenCover(item: $play, onDismiss: {
                 if let selected { startPreview(selected) }
             }) { PlayerScreen(session: $0) }
@@ -201,18 +234,24 @@ struct LiveExperienceView: View {
 
     private var filters: some View {
         HStack(spacing: 9) {
-            Menu {
-                Button("كل الفئات") { selectedCategory = "all" }
-                ForEach(categories) { category in Button(category.name) { selectedCategory = category.key } }
-            } label: {
-                Label(selectedCategory == "all" ? "كل الفئات" : (categories.first { $0.key == selectedCategory }?.name ?? "الفئة"), systemImage: "line.3.horizontal.decrease.circle.fill")
-                    .font(.subheadline.bold()).lineLimit(1).padding(.horizontal, 13).frame(height: 42)
-                    .background(BlofyTheme.surfaceRaised, in: RoundedRectangle(cornerRadius: 14))
-                    .overlay(RoundedRectangle(cornerRadius: 14).stroke(BlofyTheme.divider))
+            Button { showCategories = true } label: {
+                HStack(spacing: 8) {
+                    Image(systemName: "square.grid.2x2.fill")
+                    Text(categoryTitle).lineLimit(1)
+                    Image(systemName: "chevron.down").font(.caption2.bold()).opacity(0.65)
+                }
+                .font(.subheadline.bold())
+                .foregroundStyle(BlofyTheme.textPrimary)
+                .padding(.horizontal, 13)
+                .frame(height: 43)
+                .background(BlofyTheme.surfaceRaised, in: RoundedRectangle(cornerRadius: 14))
+                .overlay(RoundedRectangle(cornerRadius: 14).stroke(BlofyTheme.divider))
             }
+            .buttonStyle(.plain)
+
             Button { favoritesOnly.toggle() } label: {
                 Image(systemName: favoritesOnly ? "heart.fill" : "heart")
-                    .frame(width: 42, height: 42)
+                    .frame(width: 43, height: 43)
                     .background(favoritesOnly ? BlofyTheme.primaryGradient : LinearGradient(colors: [BlofyTheme.surfaceRaised, BlofyTheme.surfaceRaised], startPoint: .leading, endPoint: .trailing), in: RoundedRectangle(cornerRadius: 14))
                     .foregroundStyle(.white)
             }.buttonStyle(.plain)
@@ -235,7 +274,7 @@ struct LiveExperienceView: View {
                 VStack(spacing: 10) {
                     Image(systemName: favoritesOnly ? "heart.slash" : "tv.slash").font(.largeTitle).foregroundStyle(BlofyTheme.textMuted)
                     Text(favoritesOnly ? "ما عندك قنوات مفضلة هنا" : "ما فيه قنوات مطابقة").foregroundStyle(BlofyTheme.textMuted)
-                }.padding(.vertical, 40)
+                }.frame(maxWidth: .infinity).padding(.vertical, 40)
             }
         }.padding(.horizontal, 16).padding(.bottom, 30)
     }
@@ -263,6 +302,59 @@ struct LiveExperienceView: View {
         preview.stop()
         do { play = try model.makePlaybackSession(for: item) }
         catch { model.error = error.localizedDescription }
+    }
+}
+
+private struct LiveCategoryBrowserSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    let categories: [MediaCategory]
+    @Binding var selected: String
+    @State private var query = ""
+
+    private var filtered: [MediaCategory] {
+        guard !query.isEmpty else { return categories }
+        let q = normalizedSearch(query)
+        return categories.filter { normalizedSearch($0.name).contains(q) }
+    }
+
+    var body: some View {
+        NavigationStack {
+            ScrollView(showsIndicators: true) {
+                LazyVStack(spacing: 8) {
+                    row(key: "all", name: "كل القنوات", icon: "tv.fill")
+                    ForEach(filtered) { category in
+                        row(key: category.key, name: category.name, icon: "folder.fill")
+                    }
+                }
+                .padding(16)
+                .padding(.bottom, 30)
+            }
+            .background(BlofyTheme.backgroundGradient)
+            .navigationTitle("فئات البث")
+            .navigationBarTitleDisplayMode(.inline)
+            .searchable(text: $query, prompt: "ابحث عن فئة")
+            .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("تم") { dismiss() } } }
+        }
+        .preferredColorScheme(.dark)
+    }
+
+    private func row(key: String, name: String, icon: String) -> some View {
+        Button {
+            selected = key
+            dismiss()
+        } label: {
+            HStack(spacing: 12) {
+                Image(systemName: icon).frame(width: 28).foregroundStyle(selected == key ? .white : BlofyTheme.purpleSoft)
+                Text(name).font(.subheadline.bold()).foregroundStyle(BlofyTheme.textPrimary).lineLimit(2)
+                Spacer()
+                if selected == key { Image(systemName: "checkmark.circle.fill").foregroundStyle(BlofyTheme.mint) }
+                else { Image(systemName: "chevron.left").font(.caption.bold()).foregroundStyle(BlofyTheme.textMuted) }
+            }
+            .padding(14)
+            .background(selected == key ? AnyShapeStyle(BlofyTheme.primaryGradient) : AnyShapeStyle(BlofyTheme.surface), in: RoundedRectangle(cornerRadius: 16))
+            .overlay(RoundedRectangle(cornerRadius: 16).stroke(Color.white.opacity(0.05)))
+        }
+        .buttonStyle(.plain)
     }
 }
 
@@ -388,7 +480,7 @@ final class LivePreviewController: ObservableObject {
         if currentURL == url, player.isPlaying { return }
         stop(); currentURL = url
         guard let media = VLCMedia(url: url) else { return }
-        media.addOptions(["network-caching": 650, "no-audio": 1, "http-user-agent": "BLOFY PLAYER/2.0"])
+        media.addOptions(["network-caching": 650, "no-audio": 1, "http-user-agent": "BLOFY PLAYER/0.3"])
         player.media = media; player.play()
         timer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
             Task { @MainActor in guard let self else { return }; if self.player.isPlaying { self.ready = true } }
