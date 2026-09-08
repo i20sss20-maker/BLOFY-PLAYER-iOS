@@ -150,9 +150,7 @@ private struct SimpleHeroCard: View {
 
     var body: some View {
         ZStack(alignment: .bottomLeading) {
-            if let featured, featured.kind == .live {
-                HomeLivePreview(item: featured)
-            } else if let featured {
+            if let featured {
                 Poster(url: featured.poster)
             } else {
                 LinearGradient(colors: [BlofyTheme.purpleDeep, BlofyTheme.surfaceRaised], startPoint: .topLeading, endPoint: .bottomTrailing)
@@ -161,7 +159,7 @@ private struct SimpleHeroCard: View {
             LinearGradient(colors: [.clear, .black.opacity(0.18), BlofyTheme.background.opacity(0.96)], startPoint: .top, endPoint: .bottom)
 
             VStack(alignment: .leading, spacing: 8) {
-                Text(featured?.kind == .live ? "معاينة مباشرة" : "BLOFY PLAYER")
+                Text(featured?.kind == .live ? "البث المباشر" : "BLOFY PLAYER")
                     .font(.caption.bold())
                     .foregroundStyle(BlofyTheme.mint)
                 Text(featured?.name ?? model.selected?.name ?? "جاهز للمشاهدة")
