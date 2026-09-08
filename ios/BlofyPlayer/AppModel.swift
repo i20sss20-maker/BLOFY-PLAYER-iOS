@@ -124,6 +124,7 @@ final class AppModel: ObservableObject {
     }
 
     func delete(_ playlist: Playlist) {
+        CatalogCacheStore.remove(for: playlist.id)
         UserDefaults.standard.removeObject(forKey: checkpointKey(for: playlist))
         playlists.removeAll { $0.id == playlist.id }
         if selected?.id == playlist.id {
@@ -153,13 +154,43 @@ final class AppModel: ObservableObject {
     private func persistCheckpoint(completed: Bool = false) {
         guard let provider = selected else { return }
         let checkpoint = CatalogCheckpoint(source: sourceKey(provider), categories: categories, items: items, completedStages: Array(completedStages), progress: progress, status: status, completed: completed, updatedAt: Date())
-        if let data = try? JSONEncoder().encode(checkpoint) { UserDefaults.standard.set(data, forKey: checkpointKey(for: provider)) }
+        guard let data = try? JSONEncoder().encode(checkpoint) else { return }
+        CatalogCacheStore.save(data, for: provider.id)
+
+        // Clean up the old heavy UserDefaults representation once disk persistence succeeds.
+        let defaults = UserDefaults.standard
+        defaults.removeObject(forKey: checkpointKey(for: provider))
+        if let legacy = defaults.data(forKey: "catalogCheckpoint"),
+           let old = try? JSONDecoder().decode(CatalogCheckpoint.self, from: legacy),
+           old.source == checkpoint.source {
+            defaults.removeObject(forKey: "catalogCheckpoint")
+        }
     }
 
     private func restoreCheckpointIfPossible() {
         guard let provider = selected else { return }
         let defaults = UserDefaults.standard
-        let data = defaults.data(forKey: checkpointKey(for: provider)) ?? defaults.data(forKey: "catalogCheckpoint")
+        var data = CatalogCacheStore.load(for: provider.id)
+
+        if data == nil {
+            // One-time migration from older builds that stored full catalogs in UserDefaults.
+            data = defaults.data(forKey: checkpointKey(for: provider))
+            if data == nil, let legacy = defaults.data(forKey: "catalogCheckpoint"),
+               let old = try? JSONDecoder().decode(CatalogCheckpoint.self, from: legacy),
+               old.source == sourceKey(provider) {
+                data = legacy
+            }
+            if let data {
+                CatalogCacheStore.save(data, for: provider.id)
+                defaults.removeObject(forKey: checkpointKey(for: provider))
+                if let legacy = defaults.data(forKey: "catalogCheckpoint"),
+                   let old = try? JSONDecoder().decode(CatalogCheckpoint.self, from: legacy),
+                   old.source == sourceKey(provider) {
+                    defaults.removeObject(forKey: "catalogCheckpoint")
+                }
+            }
+        }
+
         guard let data, let checkpoint = try? JSONDecoder().decode(CatalogCheckpoint.self, from: data), checkpoint.source == sourceKey(provider) else { return }
         categories = checkpoint.categories; items = checkpoint.items; completedStages = Set(checkpoint.completedStages); progress = checkpoint.progress; status = checkpoint.status
         if checkpoint.completed || completedStages.isSuperset(of: expectedStages(for: provider)) {
@@ -167,7 +198,6 @@ final class AppModel: ObservableObject {
         } else if !items.isEmpty || !completedStages.isEmpty {
             interruptedSync = true; status = "تم استعادة التقدم المحفوظ"
         }
-        if defaults.data(forKey: checkpointKey(for: provider)) == nil { persistCheckpoint(completed: checkpoint.completed) }
     }
 
     func toggleFavorite(_ item: MediaItem) {
@@ -195,6 +225,7 @@ final class AppModel: ObservableObject {
         if !force && completedStages.isSuperset(of: expected) && !items.isEmpty { loadedSource = source; progress = 1; status = "القوائم جاهزة"; persistCheckpoint(completed: true); return }
         if force {
             categories.removeAll(); items.removeAll(); completedStages.removeAll(); loadedSource = ""; progress = 0; status = ""
+            CatalogCacheStore.remove(for: provider.id)
             UserDefaults.standard.removeObject(forKey: checkpointKey(for: provider))
         }
         loading = true; interruptedSync = false; error = ""; if progress <= 0 { progress = 0.01 }; status = completedStages.isEmpty ? "الاتصال بالسيرفر" : "متابعة التحميل من آخر مرحلة"
