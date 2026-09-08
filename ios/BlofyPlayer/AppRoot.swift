@@ -19,24 +19,31 @@ struct AppRoot: View {
             Group {
                 if bootstrapping {
                     EntrySplashView()
+                        .transition(.opacity)
                 } else if !sessionEntered || !model.activationAllowsUse {
                     ActivationView {
-                        withAnimation(.easeInOut(duration: 0.28)) {
+                        withAnimation(.spring(response: 0.42, dampingFraction: 0.9)) {
                             sessionEntered = true
                         }
                     }
-                    .transition(.opacity.combined(with: .scale(scale: 0.985)))
+                    .transition(.asymmetric(
+                        insertion: .opacity.combined(with: .scale(scale: 0.985)),
+                        removal: .opacity.combined(with: .move(edge: .leading))
+                    ))
                 } else if shouldShowProgress {
                     PremiumSyncProgressView()
-                        .transition(.opacity.combined(with: .scale(scale: 0.99)))
+                        .transition(.opacity.combined(with: .scale(scale: 0.992)))
                 } else {
                     SimpleRootView {
                         model.pauseSyncForBackground()
-                        withAnimation(.easeInOut(duration: 0.25)) {
+                        withAnimation(.spring(response: 0.4, dampingFraction: 0.9)) {
                             sessionEntered = false
                         }
                     }
-                    .transition(.opacity)
+                    .transition(.asymmetric(
+                        insertion: .opacity.combined(with: .move(edge: .trailing)),
+                        removal: .opacity
+                    ))
                 }
             }
             .animation(.easeInOut(duration: 0.24), value: sessionEntered)
@@ -47,25 +54,59 @@ struct AppRoot: View {
         .preferredColorScheme(.dark)
         .task {
             await model.refreshActivation()
-            bootstrapping = false
+            withAnimation(.easeOut(duration: 0.28)) {
+                bootstrapping = false
+            }
         }
     }
 }
 
 private struct EntrySplashView: View {
+    @State private var glow = false
+
     var body: some View {
-        VStack(spacing: 18) {
-            Spacer()
-            BlofyBrandMark()
-            ProgressView()
-                .tint(BlofyTheme.purpleBright)
-                .scaleEffect(1.1)
-            Text("BLOFY PLAYER")
-                .font(.caption.bold())
-                .tracking(2)
-                .foregroundStyle(BlofyTheme.textMuted)
-            Spacer()
+        ZStack {
+            BlofyTheme.backgroundGradient.ignoresSafeArea()
+
+            Circle()
+                .fill(BlofyTheme.purple.opacity(glow ? 0.2 : 0.1))
+                .frame(width: glow ? 330 : 250, height: glow ? 330 : 250)
+                .blur(radius: 60)
+                .animation(.easeInOut(duration: 1.5).repeatForever(autoreverses: true), value: glow)
+
+            VStack(spacing: 22) {
+                Spacer()
+
+                Image("blofy_logo")
+                    .resizable()
+                    .scaledToFit()
+                    .frame(width: 104, height: 104)
+                    .clipShape(RoundedRectangle(cornerRadius: 25, style: .continuous))
+                    .shadow(color: BlofyTheme.purple.opacity(0.35), radius: 30, y: 12)
+
+                VStack(spacing: 7) {
+                    Text("BLOFY PLAYER")
+                        .font(.system(size: 23, weight: .black, design: .rounded))
+                        .tracking(1.5)
+                        .foregroundStyle(BlofyTheme.textPrimary)
+                    Text("مشاهدة أسرع. تجربة أبسط.")
+                        .font(.caption)
+                        .foregroundStyle(BlofyTheme.textMuted)
+                }
+
+                Spacer()
+
+                VStack(spacing: 11) {
+                    ProgressView()
+                        .tint(BlofyTheme.purpleBright)
+                    Text("جاري تجهيز BLOFY")
+                        .font(.caption2.bold())
+                        .foregroundStyle(BlofyTheme.textMuted)
+                }
+                .padding(.bottom, 22)
+            }
+            .padding(28)
         }
-        .padding(24)
+        .onAppear { glow = true }
     }
 }
