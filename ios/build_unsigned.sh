@@ -26,10 +26,158 @@ rm -f build/icon-work.png
 python3 - <<'PY'
 from pathlib import Path
 
-# Full-screen live remains routed through the dedicated zapping wrapper.
+# Live screen: keep fullscreen zapping wrapper, debounce channel search, and move
+# large category menus into a dedicated scrollable/searchable sheet.
 p = Path('BlofyPlayer/LiveExperienceView.swift')
 s = p.read_text()
 s = s.replace('}) { PlayerScreen(session: $0) }', '}) { LiveFullScreenPlayer(initial: $0) }')
+
+if '    @State private var debouncedQuery = ""' not in s:
+    s = s.replace('    @State private var query = ""\n    @State private var selectedID = ""',
+'''    @State private var query = ""
+    @State private var debouncedQuery = ""
+    @State private var showCategories = false
+    @State private var selectedID = ""''', 1)
+
+s = s.replace('(query.isEmpty || normalizedSearch($0.name).contains(normalizedSearch(query)))',
+              '(debouncedQuery.isEmpty || normalizedSearch($0.name).contains(debouncedQuery))', 1)
+
+old_filters = '''    private var filters: some View {
+        HStack(spacing: 9) {
+            Menu {
+                Button("كل الفئات") { selectedCategory = "all" }
+                ForEach(categories) { category in Button(category.name) { selectedCategory = category.key } }
+            } label: {
+                Label(selectedCategory == "all" ? "كل الفئات" : (categories.first { $0.key == selectedCategory }?.name ?? "الفئة"), systemImage: "line.3.horizontal.decrease.circle.fill")
+                    .font(.subheadline.bold()).lineLimit(1).padding(.horizontal, 13).frame(height: 42)
+                    .background(BlofyTheme.surfaceRaised, in: RoundedRectangle(cornerRadius: 14))
+                    .overlay(RoundedRectangle(cornerRadius: 14).stroke(BlofyTheme.divider))
+            }
+            Button { favoritesOnly.toggle() } label: {
+                Image(systemName: favoritesOnly ? "heart.fill" : "heart")
+                    .frame(width: 42, height: 42)
+                    .background(favoritesOnly ? BlofyTheme.primaryGradient : LinearGradient(colors: [BlofyTheme.surfaceRaised, BlofyTheme.surfaceRaised], startPoint: .leading, endPoint: .trailing), in: RoundedRectangle(cornerRadius: 14))
+                    .foregroundStyle(.white)
+            }.buttonStyle(.plain)
+            Spacer()
+        }.padding(.horizontal, 16)
+    }
+'''
+new_filters = '''    private var filters: some View {
+        HStack(spacing: 9) {
+            Button { showCategories = true } label: {
+                HStack(spacing: 8) {
+                    Image(systemName: "square.grid.2x2.fill")
+                    Text(selectedCategory == "all" ? "كل الفئات" : (categories.first { $0.key == selectedCategory }?.name ?? "الفئة"))
+                        .lineLimit(1)
+                    Image(systemName: "chevron.down").font(.caption2.bold()).opacity(0.7)
+                }
+                .font(.subheadline.bold())
+                .foregroundStyle(BlofyTheme.textPrimary)
+                .padding(.horizontal, 13).frame(height: 42)
+                .background(BlofyTheme.surfaceRaised, in: RoundedRectangle(cornerRadius: 14))
+                .overlay(RoundedRectangle(cornerRadius: 14).stroke(BlofyTheme.divider))
+            }
+            .buttonStyle(.plain)
+
+            Button { favoritesOnly.toggle() } label: {
+                Image(systemName: favoritesOnly ? "heart.fill" : "heart")
+                    .frame(width: 42, height: 42)
+                    .background(favoritesOnly ? BlofyTheme.primaryGradient : LinearGradient(colors: [BlofyTheme.surfaceRaised, BlofyTheme.surfaceRaised], startPoint: .leading, endPoint: .trailing), in: RoundedRectangle(cornerRadius: 14))
+                    .foregroundStyle(.white)
+            }.buttonStyle(.plain)
+            Spacer()
+        }.padding(.horizontal, 16)
+    }
+'''
+if old_filters in s:
+    s = s.replace(old_filters, new_filters, 1)
+
+searchable = '            .searchable(text: $query, prompt: "ابحث عن قناة")\n            .refreshable'
+if searchable in s:
+    s = s.replace(searchable, '''            .searchable(text: $query, prompt: "ابحث عن قناة")
+            .task(id: query) {
+                let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
+                do { try await Task.sleep(nanoseconds: 320_000_000) } catch { return }
+                guard !Task.isCancelled else { return }
+                debouncedQuery = trimmed.count < 2 ? "" : normalizedSearch(trimmed)
+            }
+            .sheet(isPresented: $showCategories) {
+                LiveCategoryBrowserSheet(categories: categories, selected: $selectedCategory)
+                    .presentationDetents([.medium, .large])
+                    .presentationDragIndicator(.visible)
+            }
+            .refreshable''', 1)
+
+# Append the dedicated category browser once.
+if 'private struct LiveCategoryBrowserSheet' not in s:
+    s += r'''
+
+private struct LiveCategoryBrowserSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    let categories: [MediaCategory]
+    @Binding var selected: String
+    @State private var query = ""
+
+    private var filtered: [MediaCategory] {
+        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return categories }
+        let needle = normalizedSearch(trimmed)
+        return categories.filter { normalizedSearch($0.name).contains(needle) }
+    }
+
+    var body: some View {
+        NavigationStack {
+            ScrollView(showsIndicators: true) {
+                LazyVStack(spacing: 8) {
+                    row(key: "all", name: "كل الفئات", icon: "square.grid.2x2.fill")
+                    ForEach(filtered) { category in
+                        row(key: category.key, name: category.name, icon: "folder.fill")
+                    }
+                }
+                .padding(16)
+                .padding(.bottom, 30)
+            }
+            .background(BlofyTheme.backgroundGradient)
+            .navigationTitle("فئات البث")
+            .navigationBarTitleDisplayMode(.inline)
+            .searchable(text: $query, prompt: "ابحث عن فئة")
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) { Button("تم") { dismiss() } }
+            }
+        }
+        .preferredColorScheme(.dark)
+    }
+
+    private func row(key: String, name: String, icon: String) -> some View {
+        Button {
+            selected = key
+            dismiss()
+        } label: {
+            HStack(spacing: 12) {
+                Image(systemName: icon)
+                    .foregroundStyle(selected == key ? .white : BlofyTheme.purpleSoft)
+                    .frame(width: 28)
+                Text(name)
+                    .font(.subheadline.bold())
+                    .foregroundStyle(BlofyTheme.textPrimary)
+                    .lineLimit(2)
+                Spacer()
+                if selected == key {
+                    Image(systemName: "checkmark.circle.fill").foregroundStyle(BlofyTheme.mint)
+                } else {
+                    Image(systemName: "chevron.left").font(.caption.bold()).foregroundStyle(BlofyTheme.textMuted)
+                }
+            }
+            .padding(14)
+            .background(selected == key ? AnyShapeStyle(BlofyTheme.primaryGradient) : AnyShapeStyle(BlofyTheme.surface), in: RoundedRectangle(cornerRadius: 16))
+            .overlay(RoundedRectangle(cornerRadius: 16).stroke(Color.white.opacity(0.05)))
+        }
+        .buttonStyle(.plain)
+    }
+}
+'''
+
 p.write_text(s)
 
 # Catalog pages: debounce expensive filtering on very large Xtream libraries.
@@ -45,14 +193,15 @@ if '    @State private var debouncedQuery = ""' not in s.split('struct CatalogVi
     s = s.replace('            .searchable(text: $query, prompt: "ابحث في \\(kind.title)")\n            .refreshable',
 '''            .searchable(text: $query, prompt: "ابحث في \\(kind.title)")
             .task(id: query) {
+                let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
                 do { try await Task.sleep(nanoseconds: 320_000_000) } catch { return }
                 guard !Task.isCancelled else { return }
-                debouncedQuery = normalizedSearch(query)
+                debouncedQuery = trimmed.count < 2 ? "" : normalizedSearch(trimmed)
             }
             .refreshable''', 1)
 
-# Replace the global search view with a debounced implementation. It caps visible
-# matches so typing never tries to build hundreds/thousands of rows at once.
+# Replace global search with debounced + capped results. This prevents a huge
+# library from rebuilding hundreds/thousands of rows for every keystroke.
 marker = 'struct SearchView: View {'
 idx = s.find(marker)
 if idx == -1:
@@ -89,7 +238,7 @@ search_view = r'''struct SearchView: View {
                     VStack(spacing: 10) {
                         Image(systemName: "magnifyingglass").font(.system(size: 34)).foregroundStyle(BlofyTheme.textMuted)
                         Text("ابحث عن أي محتوى").font(.headline).foregroundStyle(BlofyTheme.textPrimary)
-                        Text("اكتب اسم القناة أو الفيلم أو المسلسل.").font(.caption).foregroundStyle(BlofyTheme.textMuted)
+                        Text("اكتب حرفين أو أكثر للبحث.").font(.caption).foregroundStyle(BlofyTheme.textMuted)
                     }
                 } else if results.isEmpty {
                     VStack(spacing: 10) {
@@ -104,7 +253,7 @@ search_view = r'''struct SearchView: View {
             .searchable(text: $query, prompt: "اكتب للبحث")
             .task(id: query) {
                 let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
-                if trimmed.isEmpty {
+                if trimmed.count < 2 {
                     results = []
                     searching = false
                     return
@@ -113,8 +262,15 @@ search_view = r'''struct SearchView: View {
                 do { try await Task.sleep(nanoseconds: 350_000_000) } catch { return }
                 guard !Task.isCancelled else { return }
                 let needle = normalizedSearch(trimmed)
-                let snapshot = model.items
-                results = Array(snapshot.lazy.filter { normalizedSearch($0.name).contains(needle) }.prefix(120))
+                var matches: [MediaItem] = []
+                matches.reserveCapacity(120)
+                for item in model.items {
+                    if normalizedSearch(item.name).contains(needle) {
+                        matches.append(item)
+                        if matches.count == 120 { break }
+                    }
+                }
+                results = matches
                 searching = false
             }
         }
